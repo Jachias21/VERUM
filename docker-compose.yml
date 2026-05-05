@@ -1,0 +1,121 @@
+services:
+
+  # ── Infrastructure ────────────────────────────────────────────────────────
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: verum_rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"   # Management UI → http://localhost:15672
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-verum}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-verum_pass}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mongodb:
+    image: mongo:7.0
+    container_name: verum_mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-verum}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASS:-verum_pass}
+      MONGO_INITDB_DATABASE: verum
+    volumes:
+      - mongodb_data:/data/db
+
+  qdrant:
+    image: qdrant/qdrant:v1.9.0
+    container_name: verum_qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"   # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: verum_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    # AMD ROCm GPU — uncomment on home-lab
+    # devices:
+    #   - /dev/kfd
+    #   - /dev/dri
+
+  # ── Application services ──────────────────────────────────────────────────
+
+  gateway:
+    build: ./services/gateway
+    container_name: verum_gateway
+    ports:
+      - "8000:8000"
+    env_file: .env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker_vision:
+    build: ./services/worker_vision
+    container_name: verum_worker_vision
+    env_file: .env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+    volumes:
+      - ./models/vision/weights:/app/weights:ro
+    restart: unless-stopped
+
+  worker_nlp:
+    build: ./services/worker_nlp
+    container_name: verum_worker_nlp
+    env_file: .env
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      mongodb:
+        condition: service_started
+      ollama:
+        condition: service_started
+    restart: unless-stopped
+
+  dashboard:
+    build: ./dashboard
+    container_name: verum_dashboard
+    ports:
+      - "8501:8501"
+    env_file: .env
+    depends_on:
+      - mongodb
+    restart: unless-stopped
+
+  # ── ETL — run on-demand (cron or manual) ─────────────────────────────────
+
+  etl:
+    build: ./services/etl
+    container_name: verum_etl
+    env_file: .env
+    depends_on:
+      - qdrant
+    profiles:
+      - etl   # docker compose --profile etl run etl
+
+volumes:
+  rabbitmq_data:
+  mongodb_data:
+  qdrant_data:
+  ollama_data:

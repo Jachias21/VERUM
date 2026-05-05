@@ -1,0 +1,84 @@
+# ── Secretos y credenciales ───────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+secrets/
+credentials/
+*_credentials.json
+*_service_account.json
+google_credentials*.json
+firebase*.json
+# Tokens sueltos que a veces se cuelan en ficheros de config
+*token*.json
+*secret*.json
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+.Python
+*.egg-info/
+dist/
+build/
+pip-log.txt
+
+# ── Modelos ML (binarios grandes) ────────────────────────────────────────────
+models/vision/weights/*.pt
+models/vision/weights/*.pth
+models/vision/weights/*.onnx
+models/vision/weights/*.bin
+models/vision/weights/*.safetensors
+# Modelos descargados por HuggingFace / sentence-transformers
+~/.cache/huggingface/
+.cache/
+
+# ── Datos (raw y procesados nunca van al repo) ────────────────────────────────
+data/raw/
+data/processed/
+data/knowledge_base/
+!data/**/.gitkeep
+*.csv
+*.parquet
+*.jsonl
+*.arrow
+*.feather
+*.h5
+*.hdf5
+*.sqlite
+*.db
+
+# ── Notebooks ─────────────────────────────────────────────────────────────────
+notebooks/.ipynb_checkpoints/
+# Outputs de celdas con datos sensibles — commitear sólo notebooks limpios
+# Para limpiar: jupyter nbconvert --clear-output --inplace notebooks/*.ipynb
+
+# ── Docker y entornos locales ─────────────────────────────────────────────────
+*.log
+docker-compose.override.yml     # overrides locales nunca al repo
+.docker/
+
+# ── IDEs y SO ─────────────────────────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+Thumbs.db
+
+# ── Temporales de inferencia ──────────────────────────────────────────────────
+/tmp/
+*.tmp
+heatmap_*.png                   # Grad-CAM generados en runtime
+
+
+VERUM_TFM.md
+CLAUDE.md

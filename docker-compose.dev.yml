@@ -1,0 +1,28 @@
+# Development overrides — hot-reload source, skip production infra
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  gateway:
+    build:
+      context: ./services/gateway
+      target: dev
+    volumes:
+      - ./services/gateway/app:/app/app
+      - ./shared:/app/shared
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  worker_vision:
+    volumes:
+      - ./services/worker_vision/app:/app/app
+      - ./shared:/app/shared
+      - ./models/vision/weights:/app/weights
+
+  worker_nlp:
+    volumes:
+      - ./services/worker_nlp/app:/app/app
+      - ./shared:/app/shared
+
+  etl:
+    volumes:
+      - ./services/etl/app:/app/app
+      - ./shared:/app/shared
