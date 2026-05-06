@@ -55,7 +55,9 @@ services:
   # ── Application services ──────────────────────────────────────────────────
 
   gateway:
-    build: ./services/gateway
+    build:
+      context: .
+      dockerfile: services/gateway/Dockerfile
     container_name: verum_gateway
     ports:
       - "8000:8000"
@@ -66,7 +68,9 @@ services:
     restart: unless-stopped
 
   worker_vision:
-    build: ./services/worker_vision
+    build:
+      context: .
+      dockerfile: services/worker_vision/Dockerfile
     container_name: verum_worker_vision
     env_file: .env
     depends_on:
@@ -79,7 +83,9 @@ services:
     restart: unless-stopped
 
   worker_nlp:
-    build: ./services/worker_nlp
+    build:
+      context: .
+      dockerfile: services/worker_nlp/Dockerfile
     container_name: verum_worker_nlp
     env_file: .env
     depends_on:
@@ -106,7 +112,9 @@ services:
   # ── ETL — run on-demand (cron or manual) ─────────────────────────────────
 
   etl:
-    build: ./services/etl
+    build:
+      context: .
+      dockerfile: services/etl/Dockerfile
     container_name: verum_etl
     env_file: .env
     depends_on:
