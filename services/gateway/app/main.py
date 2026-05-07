@@ -8,13 +8,18 @@ Responsibilities:
 import os
 
 from fastapi import FastAPI, HTTPException, Header, Request
+from pydantic import BaseModel
 from dotenv import load_dotenv
 
-from app.router import route_message
+from app.router import route_message, publish_nlp_task
 
 load_dotenv()
 
 app = FastAPI(title="VERUM Gateway", version="0.1.0")
+
+
+class TextRequest(BaseModel):
+    text: str
 
 
 @app.get("/health")
@@ -35,3 +40,9 @@ async def telegram_webhook(
     # Fire-and-forget: publish to queue and return 200 immediately
     await route_message(payload)
     return {"ok": True}
+
+
+@app.post("/process_text/")
+async def process_text(body: TextRequest):
+    task_id = await publish_nlp_task(body.text)
+    return {"task_id": task_id}

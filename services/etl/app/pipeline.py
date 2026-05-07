@@ -17,6 +17,7 @@ import os
 import uuid
 
 import feedparser
+from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient
 from qdrant_client.models import PointStruct, VectorParams, Distance
@@ -37,10 +38,12 @@ def extract() -> list[dict]:
     for url in RSS_FEEDS:
         feed = feedparser.parse(url)
         for entry in feed.entries:
+            raw_summary = entry.get("summary", "")
+            clean_summary = BeautifulSoup(raw_summary, "html.parser").get_text(separator=" ", strip=True)
             articles.append({
                 "id": str(uuid.uuid5(uuid.NAMESPACE_URL, entry.get("link", ""))),
                 "title": entry.get("title", ""),
-                "summary": entry.get("summary", ""),
+                "summary": clean_summary,
                 "url": entry.get("link", ""),
                 "publisher": feed.feed.get("title", ""),
                 "published": entry.get("published", ""),

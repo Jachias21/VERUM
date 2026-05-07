@@ -68,3 +68,23 @@ async def route_message(payload: dict) -> None:
         aio_pika.Message(body=body.encode()),
         routing_key=queue,
     )
+
+
+async def publish_nlp_task(text: str) -> str:
+    """Publish a text task directly to the NLP queue and return the task_id."""
+    from shared.schemas import TextTask
+
+    task = TextTask(
+        user_hash="api_direct",
+        text=text,
+        timestamp=datetime.now(timezone.utc),
+    )
+    task_id = str(task.query_id)
+    queue = os.getenv("RABBITMQ_QUEUE_TEXTS", "topic_texts")
+
+    channel = await _get_channel()
+    await channel.default_exchange.publish(
+        aio_pika.Message(body=task.model_dump_json().encode()),
+        routing_key=queue,
+    )
+    return task_id
