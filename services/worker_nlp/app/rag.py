@@ -35,7 +35,8 @@ async def hybrid_search(
     threshold = float(os.getenv("NLP_CONFIDENCE_THRESHOLD", 0.75))
 
     # ── Level 1: Local Qdrant hybrid search ──────────────────────────────────
-    local_hits = await _search_qdrant([text])
+    query_terms = entities if entities else [text[:200]]  # graceful degradation
+    local_hits = await _search_qdrant(query_terms)
 
     if local_hits and local_hits[0]["score"] >= threshold:
         best = local_hits[0]
@@ -109,10 +110,31 @@ async def synthesize_verdict(text: str, result: NLPResult) -> str:
 
     llm = OllamaLLM(base_url=ollama_url, model=model_name, temperature=0.0)  # type: ignore[call-arg]
     chain = prompt | llm
-    verdict_text: str = await chain.ainvoke(
-        {"message_text": text, "retrieved_article": retrieved_article}
-    )
-    return verdict_text.strip()
+
+    MAX_RETRIES = 2
+    OLLAMA_TIMEOUT_SECONDS = 45
+
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            verdict_text: str = await asyncio.wait_for(
+                chain.ainvoke({"message_text": text, "retrieved_article": retrieved_article}),
+                timeout=OLLAMA_TIMEOUT_SECONDS,
+            )
+            return verdict_text.strip()
+        except asyncio.TimeoutError:
+            if attempt == MAX_RETRIES:
+                return (
+                    f"Veredicto: {result.verdict}\n"
+                    f"[El modelo de síntesis tardó demasiado. Fuente: {result.source_url or 'N/A'}]"
+                )
+            await asyncio.sleep(2 ** attempt)
+        except Exception as exc:
+            print(f"[rag] Ollama synthesis error (attempt {attempt + 1}): {exc}")
+            if attempt == MAX_RETRIES:
+                return f"Veredicto: {result.verdict}\nFuente: {result.source_url or 'N/A'}"
+            await asyncio.sleep(2 ** attempt)
+    # Unreachable, but satisfies type checkers
+    return f"Veredicto: {result.verdict}\nFuente: {result.source_url or 'N/A'}"
 
 
 # ── Private helpers ───────────────────────────────────────────────────────────
@@ -167,7 +189,7 @@ async def _search_qdrant(entities: list[str]) -> list[dict]:
         results.append({
             "score": hit.score,
             "url": payload.get("url", ""),
-            "verdict": _normalise_rating(article_text),
+            "verdict": payload.get("verdict", _normalise_rating(article_text)),  # stored field first, fallback for old points
             "text": article_text,
         })
     return results

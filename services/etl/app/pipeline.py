@@ -42,6 +42,18 @@ RSS_FEEDS = [
 DENSE_DIM = 1024
 
 
+def _infer_verdict_from_entry(entry: dict) -> str:
+    """Best-effort verdict from RSS tags/categories before storing in Qdrant."""
+    tags = " ".join(t.get("term", "") for t in entry.get("tags", [])).lower()
+    title = entry.get("title", "").lower()
+    combined = tags + " " + title
+    if any(w in combined for w in ["falso", "false", "fake", "bulo", "hoax", "incorrecto"]):
+        return "FAKE"
+    if any(w in combined for w in ["verdadero", "true", "correcto", "verified"]):
+        return "REAL"
+    return "UNVERIFIED"
+
+
 def extract() -> list[dict]:
     """Pull latest articles from RSS feeds."""
     articles = []
@@ -57,6 +69,7 @@ def extract() -> list[dict]:
                 "url": entry.get("link", ""),
                 "publisher": feed.feed.get("title", ""),
                 "published": entry.get("published", ""),
+                "verdict": _infer_verdict_from_entry(entry),
             })
     return articles
 

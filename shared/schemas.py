@@ -23,6 +23,7 @@ class ImageTask(BaseModel):
 class TextTask(BaseModel):
     query_id: uuid.UUID = Field(default_factory=uuid.uuid4)
     user_hash: str
+    chat_id: int
     text: str
     timestamp: datetime.datetime
 

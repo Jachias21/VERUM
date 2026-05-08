@@ -4,10 +4,13 @@ tasks to the appropriate RabbitMQ queue.
 """
 import os
 import hashlib
+import logging
 import uuid
 from datetime import datetime, timezone
 
 import aio_pika
+
+logger = logging.getLogger(__name__)
 
 # Lazy singleton connection
 _connection: aio_pika.abc.AbstractRobustConnection | None = None
@@ -27,6 +30,7 @@ async def _get_channel() -> aio_pika.abc.AbstractChannel:
 async def route_message(payload: dict) -> None:
     message = payload.get("message") or payload.get("channel_post", {})
     if not message:
+        logger.warning("route_message: payload contains no 'message' or 'channel_post' key — skipping. payload=%s", payload)
         return
 
     user_id = str(message.get("from", {}).get("id", "unknown"))
@@ -48,19 +52,34 @@ async def route_message(payload: dict) -> None:
 
     elif "text" in message:
         from shared.schemas import TextTask
-        text: str = message["text"]
-        if len(text) < int(os.getenv("NLP_MIN_TEXT_LENGTH", 50)):
-            return  # Too short to be a viral rumour
+        text: str = message.get("text", "")
+        chat_id: int = message.get("chat", {}).get("id", 0)
+        min_length = int(os.getenv("NLP_MIN_TEXT_LENGTH", 3))
+        if len(text) < min_length:
+            logger.info(
+                "route_message: text too short (%d chars, min=%d) — dropped. chat_id=%s",
+                len(text), min_length, chat_id,
+            )
+            return
         task = TextTask(
             query_id=query_id,
             user_hash=user_hash,
+            chat_id=chat_id,
             text=text,
             timestamp=timestamp,
         )
         queue = os.getenv("RABBITMQ_QUEUE_TEXTS", "topic_texts")
         body = task.model_dump_json()
+        logger.info(
+            "route_message: publishing TextTask query_id=%s chat_id=%s queue=%s text_preview=%.60r",
+            query_id, chat_id, queue, text,
+        )
 
     else:
+        logger.info(
+            "route_message: unsupported message type (no 'text' or 'photo') — skipping. keys=%s",
+            list(message.keys()),
+        )
         return  # Unsupported payload type (video, sticker, etc.)
 
     channel = await _get_channel()
@@ -68,6 +87,7 @@ async def route_message(payload: dict) -> None:
         aio_pika.Message(body=body.encode()),
         routing_key=queue,
     )
+    logger.info("route_message: message published to queue=%s", queue)
 
 
 async def publish_nlp_task(text: str) -> str:
@@ -76,6 +96,7 @@ async def publish_nlp_task(text: str) -> str:
 
     task = TextTask(
         user_hash="api_direct",
+        chat_id=0,  # no Telegram chat for direct API calls
         text=text,
         timestamp=datetime.now(timezone.utc),
     )
