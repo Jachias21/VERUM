@@ -8,20 +8,16 @@ spacy
 
 # RAG orchestration
 langchain
-langchain-community
 langchain-core
 
 # Vector DB
-qdrant-client
+qdrant-client>=1.9.0
 
 # Embeddings
-sentence-transformers    # hosts BAAI/bge-m3
+fastembed>=0.3.0         # multilingual-e5-large dense + Qdrant/bm25 sparse (ONNX)
 
 # LLM (via Ollama)
 langchain-ollama
-
-# Keyword search (BM25)
-rank-bm25
 
 # External fact-check APIs
 httpx

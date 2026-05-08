@@ -3,24 +3,24 @@ RAG pipeline — Hybrid Search (Local Qdrant → Google Fact Check API fallback)
 followed by LLM synthesis via Ollama.
 
 Architecture:
-  Level 1: BM25 + dense vector search against local Qdrant knowledge base.
+  Level 1: Hybrid vector search (dense + BM25 sparse, fused with RRF) against
+           local Qdrant knowledge base.
   Level 2: On-demand Google Fact Check Tools API (if Level 1 confidence < threshold).
-  Fusion:  Reciprocal Rank Fusion (RRF) of both result sets.
   Synthesis: Ollama SLM (Llama 3.2 / Qwen 2.5) generates a 3-line verdict.
 """
 from __future__ import annotations
 
 import asyncio
-from http import client
 import os
 import uuid
 
 import httpx
-from langchain_community.llms import Ollama
+from langchain_ollama import OllamaLLM
 from langchain_core.prompts import PromptTemplate
 from qdrant_client import AsyncQdrantClient
+from qdrant_client.models import Fusion, FusionQuery, Prefetch, SparseVector
 from shared.schemas import NLPResult
-from models.nlp.embeddings import embed
+from models.nlp.embeddings import embed, sparse_embed
 
 
 async def hybrid_search(
@@ -35,7 +35,7 @@ async def hybrid_search(
     threshold = float(os.getenv("NLP_CONFIDENCE_THRESHOLD", 0.75))
 
     # ── Level 1: Local Qdrant hybrid search ──────────────────────────────────
-    local_hits = await _search_qdrant(entities)
+    local_hits = await _search_qdrant([text])
 
     if local_hits and local_hits[0]["score"] >= threshold:
         best = local_hits[0]
@@ -86,7 +86,9 @@ async def synthesize_verdict(text: str, result: NLPResult) -> str:
             f"Referencia: {result.source_url or 'Sin coincidencias en la base de datos.'}"
         )
 
-    ollama_url = os.getenv("OLLAMA_HOST", "http://ollama:11434")
+    _ollama_host = os.getenv("OLLAMA_HOST", "ollama")
+    _ollama_port = os.getenv("OLLAMA_PORT", "11434")
+    ollama_url = f"http://{_ollama_host}:{_ollama_port}"
     model_name = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
 
     prompt = PromptTemplate(
@@ -105,7 +107,7 @@ async def synthesize_verdict(text: str, result: NLPResult) -> str:
         ),
     )
 
-    llm = Ollama(base_url=ollama_url, model=model_name, temperature=0.0)  # type: ignore[call-arg]
+    llm = OllamaLLM(base_url=ollama_url, model=model_name, temperature=0.0)  # type: ignore[call-arg]
     chain = prompt | llm
     verdict_text: str = await chain.ainvoke(
         {"message_text": text, "retrieved_article": retrieved_article}
@@ -116,17 +118,26 @@ async def synthesize_verdict(text: str, result: NLPResult) -> str:
 # ── Private helpers ───────────────────────────────────────────────────────────
 
 async def _search_qdrant(entities: list[str]) -> list[dict]:
-    """Dense vector search against the local Qdrant 'fact_checks' collection."""
+    """Hybrid vector search (dense + BM25 sparse, fused with RRF) against 'fact_checks'."""
     if not entities:
         return []
 
     query_text = " ".join(entities)
 
-    # embed() is CPU-bound; run in a thread to avoid blocking the event loop
+    # Both embeddings are CPU-bound; run together in a thread pool
     loop = asyncio.get_event_loop()
-    vectors: list[list[float]] = await loop.run_in_executor(None, embed, [query_text])
-    if not vectors:
-        return []
+
+    def _embed_both(text: str):
+        dense = embed([text])[0]                     # list[float]
+        sparse_results = sparse_embed([text])        # list[SparseEmbedding]
+        return dense, sparse_results[0]
+
+    dense_vec, sparse_emb = await loop.run_in_executor(None, _embed_both, query_text)
+
+    sparse_vec = SparseVector(
+        indices=sparse_emb.indices.tolist(),
+        values=sparse_emb.values.tolist(),
+    )
 
     qdrant_host = os.getenv("QDRANT_HOST", "qdrant")
     qdrant_port = int(os.getenv("QDRANT_PORT", "6333"))
@@ -136,13 +147,17 @@ async def _search_qdrant(entities: list[str]) -> list[dict]:
         client = AsyncQdrantClient(host=qdrant_host, port=qdrant_port)
         response = await client.query_points(
             collection_name=collection,
-            query=vectors[0],
+            prefetch=[
+                Prefetch(query=dense_vec, using="dense", limit=20),
+                Prefetch(query=sparse_vec, using="sparse", limit=20),
+            ],
+            query=FusionQuery(fusion=Fusion.RRF),
             limit=5,
             with_payload=True,
-            )
+        )
         hits = response.points
     except Exception as exc:  # noqa: BLE001
-        print(f"[rag] Qdrant search failed: {exc}")
+        print(f"[rag] Qdrant hybrid search failed: {exc}")
         return []
 
     results = []

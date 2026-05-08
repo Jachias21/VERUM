@@ -4,8 +4,8 @@ fact-checking articles.
 
 Stages:
   Extract   → Pull articles from fact-checking RSS feeds / Google API.
-  Transform → Clean text, generate dense (BAAI/bge-m3) + sparse (BM25) vectors.
-  Load      → Upsert Points into Qdrant collection.
+  Transform → Clean text, generate dense (intfloat/multilingual-e5-large) + sparse (Qdrant/bm25) vectors.
+  Load      → Upsert Points into Qdrant collection (named-vector / hybrid schema).
 
 Run modes:
   - One-shot: python -m app.pipeline
@@ -20,7 +20,14 @@ import feedparser
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient
-from qdrant_client.models import PointStruct, VectorParams, Distance
+from qdrant_client.models import (
+    Distance,
+    PointStruct,
+    SparseIndexParams,
+    SparseVector,
+    SparseVectorParams,
+    VectorParams,
+)
 
 load_dotenv()
 
@@ -30,6 +37,9 @@ RSS_FEEDS = [
     "https://newtral.es/feed/",
     "https://www.snopes.com/feed/",
 ]
+
+# Dense vector dimension for BAAI/bge-m3
+DENSE_DIM = 1024
 
 
 def extract() -> list[dict]:
@@ -51,47 +61,79 @@ def extract() -> list[dict]:
     return articles
 
 
-def transform(articles: list[dict]):
-    """Generate dense embeddings for each article. Returns list of PointStruct."""
-    from sentence_transformers import SentenceTransformer
-    model = SentenceTransformer(os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3"))
+def transform(articles: list[dict]) -> list[PointStruct]:
+    """Generate dense + sparse embeddings for each article. Returns list of PointStruct."""
+    from fastembed import TextEmbedding, SparseTextEmbedding
+
+    texts = [f"{art['title']} {art['summary']}" for art in articles]
+
+    print("[etl] Loading dense model (multilingual-e5-large, ONNX)…")
+    dense_model = TextEmbedding(model_name="intfloat/multilingual-e5-large")
+    print(f"[etl] Encoding {len(texts)} texts (dense)…")
+    dense_vectors = list(dense_model.embed(texts))
+
+    # Free dense model before loading sparse to reduce peak RAM usage
+    import gc
+    del dense_model
+    gc.collect()
+
+    print("[etl] Loading sparse model (Qdrant/bm25)…")
+    sparse_model = SparseTextEmbedding(model_name="Qdrant/bm25")
+    print(f"[etl] Encoding {len(texts)} texts (sparse)…")
+    sparse_embeddings = list(sparse_model.embed(texts))
 
     points = []
-    for art in articles:
-        text = f"{art['title']} {art['summary']}"
-        vector = model.encode(text).tolist()
+    for art, dense_vec, sparse_emb in zip(articles, dense_vectors, sparse_embeddings):
+        sparse_vec = SparseVector(
+            indices=sparse_emb.indices.tolist(),
+            values=sparse_emb.values.tolist(),
+        )
         points.append(
             PointStruct(
                 id=art["id"],
-                vector=vector,
+                vector={
+                    "dense": dense_vec.tolist(),
+                    "sparse": sparse_vec,
+                },
                 payload={k: v for k, v in art.items() if k != "id"},
             )
         )
     return points
 
 
-def load(points) -> None:
-    """Upsert points into Qdrant."""
+def load(points: list[PointStruct]) -> None:
+    """Recreate collection with hybrid schema and upsert all points."""
     client = QdrantClient(
         host=os.getenv("QDRANT_HOST", "localhost"),
         port=int(os.getenv("QDRANT_PORT", 6333)),
     )
     collection = os.getenv("QDRANT_COLLECTION", "fact_checks")
 
-    # Create collection if it doesn't exist
+    # Always recreate so the schema reflects dense + sparse named vectors
     existing = [c.name for c in client.get_collections().collections]
-    if collection not in existing:
-        client.create_collection(
-            collection_name=collection,
-            vectors_config=VectorParams(size=1024, distance=Distance.COSINE),
-        )
+    if collection in existing:
+        print(f"[etl] Dropping existing collection '{collection}'…")
+        client.delete_collection(collection)
+
+    print(f"[etl] Creating hybrid collection '{collection}' (dense + sparse)…")
+    client.create_collection(
+        collection_name=collection,
+        vectors_config={
+            "dense": VectorParams(size=DENSE_DIM, distance=Distance.COSINE),
+        },
+        sparse_vectors_config={
+            "sparse": SparseVectorParams(
+                index=SparseIndexParams(on_disk=False),
+            ),
+        },
+    )
 
     client.upsert(collection_name=collection, points=points)
-    print(f"[etl] Upserted {len(points)} points into '{collection}'.")
+    print(f"[etl] Upserted {len(points)} hybrid points into '{collection}'.")
 
 
 def run() -> None:
-    print("[etl] Starting pipeline…")
+    print("[etl] Starting hybrid ETL pipeline…")
     articles = extract()
     print(f"[etl] Extracted {len(articles)} articles.")
     points = transform(articles)

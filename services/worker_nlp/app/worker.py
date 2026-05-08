@@ -29,6 +29,7 @@ async def process(message: aio_pika.abc.AbstractIncomingMessage) -> None:
 
         # TODO: log to MongoDB + send Telegram reply
         print(f"[nlp] {task.query_id} → {result.verdict} ({elapsed_ms}ms)")
+        print(f"[nlp] LLM verdict:\n{result.summary}")
 
 
 async def main() -> None:
