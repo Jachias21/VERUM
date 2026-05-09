@@ -76,12 +76,18 @@ async def route_message(payload: dict) -> None:
         from shared.schemas import TextTask
         text: str = message.get("text", "")
         chat_id: int = message.get("chat", {}).get("id", 0)
-        min_length = int(os.getenv("NLP_MIN_TEXT_LENGTH", 3))
+        min_length = int(os.getenv("NLP_MIN_TEXT_LENGTH", 15))
         if len(text) < min_length:
             logger.info(
                 "route_message: text too short (%d chars, min=%d) — dropped. chat_id=%s",
                 len(text), min_length, chat_id,
             )
+            if chat_id:
+                await _send_interim_message(
+                    chat_id,
+                    "⚠️ Tu mensaje es muy corto para analizarlo. Envíame un texto de al menos "
+                    f"{min_length} caracteres con una afirmación o noticia completa.",
+                )
             return
         # Send interim acknowledgment (fire-and-forget) for non-command texts
         if not text.startswith("/"):

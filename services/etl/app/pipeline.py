@@ -14,6 +14,7 @@ Run modes:
 from __future__ import annotations
 
 import os
+import socket
 import uuid
 
 import feedparser
@@ -34,20 +35,49 @@ load_dotenv()
 
 # Fact-checking RSS sources (extend freely)
 RSS_FEEDS = [
+    # ── Spanish fact-checkers ─────────────────────────────────────────
     "https://maldita.es/feed/",
     "https://newtral.es/feed/",
-    "https://www.snopes.com/feed/",
     "https://verificat.cat/feed/",
     "https://factual.afp.com/list/es/rss.xml",
-    "https://www.reuters.com/fact-check/rss.xml",
-    "https://www.efeverde.com/feed/",
     "https://www.newtral.es/area/fast-forward/feed/",
     "https://hechosdehoy.com/feed/",
+    # ── Latin-American fact-checkers ────────────────────────────────
+    "https://chequeado.com/feed/",
+    "https://colombiacheck.com/feed",
+    "https://factchequeado.com/feed/",
+    "https://lasillavacia.com/feed",
+    "https://www.pagina12.com.ar/rss/secciones/el-planeta/notas",
+    # ── English fact-checkers (high quality) ────────────────────────
+    "https://www.snopes.com/feed/",
+    "https://www.factcheck.org/feed/",
+    "https://fullfact.org/feed/",
+    "https://apnews.com/hub/fact-checking/feed",
+    "https://www.politifact.com/rss/all.rss/",
+    "https://www.reuters.com/fact-check/rss.xml",
+    "https://factuel.afp.com/list/en/rss.xml",
+    # ── Anti-disinformation organisations ─────────────────────────
+    "https://www.stopfake.org/en/feed/",
+    "https://euvsdisinfo.eu/feed/",
+    # ── Reference media with fact-check sections ───────────────────
+    "https://elpais.com/rss/elpais/portada.xml",
+    "https://www.bbc.com/mundo/rss.xml",
+    "https://www.20minutos.es/rss/",
+    "https://www.efeverde.com/feed/",
+    # ── General quality news (broad coverage) ─────────────────────
+    "https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/section/internacional/portada",
+    "https://www.lavanguardia.com/mvc/feed/rss/vida/salud",
+    "https://www.elmundo.es/rss/espana.xml",
+    "https://www.rtve.es/api/noticias.rss",
+    "https://www.infobae.com/feeds/rss/",
+    "https://www.clarin.com/rss/lo-ultimo/",
 ]
 
 # Publishers that exclusively publish fact-checks / debunks → default verdict FAKE
 _FACTCHECKER_PUBLISHERS = [
     "maldita", "newtral", "verificat", "afp factual", "fact check", "reuters",
+    "snopes", "fullfact", "factcheck", "politifact", "chequeado", "colombiacheck",
+    "factchequeado", "stopfake", "euvsdisinfo", "hechosdehoy",
 ]
 
 # Dense vector dimension for BAAI/bge-m3
@@ -86,53 +116,60 @@ def _infer_verdict_from_entry(entry: dict, publisher: str = "") -> str:
 
 
 def extract_from_gnews() -> list[dict]:
-    """Pull articles from GNews API (Spanish fake-news search).
+    """Pull articles from GNews API for multiple queries (Spanish + English).
 
     Returns an empty list silently if GNEWS_API_KEY is not set or the request
     fails, so the rest of the ETL is never disrupted.
+    Deduplicates by URL across queries.
     """
     api_key = os.getenv("GNEWS_API_KEY", "")
     if not api_key:
         return []
 
-    url = (
-        f"https://gnews.io/api/v4/search"
-        f"?q=fake+news+bulo&lang=es&token={api_key}&max=20"
-    )
-    try:
-        resp = httpx.get(url, timeout=15)
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception as exc:
-        print(f"[etl] GNews request failed, skipping: {exc}")
-        return []
+    queries = ["fake news bulo", "desinformación España", "fact check", "hoax viral"]
+    seen: dict[str, dict] = {}  # url → article dict (dedup)
 
-    articles = []
-    for item in data.get("articles", []):
-        link = item.get("url", "")
-        publisher = item.get("source", {}).get("name", "GNews")
-        raw_summary = item.get("description", "") or ""
-        clean_summary = BeautifulSoup(raw_summary, "html.parser").get_text(separator=" ", strip=True)
-        # Build a synthetic entry dict compatible with _infer_verdict_from_entry
-        synthetic_entry = {
-            "title": item.get("title", ""),
-            "summary": item.get("content", raw_summary),
-            "tags": [],
-        }
-        articles.append({
-            "id": str(uuid.uuid5(uuid.NAMESPACE_URL, link)),
-            "title": item.get("title", ""),
-            "summary": clean_summary,
-            "url": link,
-            "publisher": publisher,
-            "published": item.get("publishedAt", ""),
-            "verdict": _infer_verdict_from_entry(synthetic_entry, publisher),
-        })
-    return articles
+    for query in queries:
+        url = (
+            f"https://gnews.io/api/v4/search"
+            f"?q={query.replace(' ', '+')}&lang=es&token={api_key}&max=20"
+        )
+        try:
+            resp = httpx.get(url, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as exc:
+            print(f"[etl] GNews request failed for query {query!r}, skipping: {exc}")
+            continue
+
+        for item in data.get("articles", []):
+            link = item.get("url", "")
+            if not link or link in seen:
+                continue
+            publisher = item.get("source", {}).get("name", "GNews")
+            raw_summary = item.get("description", "") or ""
+            clean_summary = BeautifulSoup(raw_summary, "html.parser").get_text(separator=" ", strip=True)
+            synthetic_entry = {
+                "title": item.get("title", ""),
+                "summary": item.get("content", raw_summary),
+                "tags": [],
+            }
+            seen[link] = {
+                "id": str(uuid.uuid5(uuid.NAMESPACE_URL, link)),
+                "title": item.get("title", ""),
+                "summary": clean_summary,
+                "url": link,
+                "publisher": publisher,
+                "published": item.get("publishedAt", ""),
+                "verdict": _infer_verdict_from_entry(synthetic_entry, publisher),
+            }
+
+    return list(seen.values())
 
 
 def extract() -> list[dict]:
     """Pull latest articles from RSS feeds and GNews API."""
+    socket.setdefaulttimeout(10)
     articles = []
     for url in RSS_FEEDS:
         try:
@@ -155,7 +192,7 @@ def extract() -> list[dict]:
 
     gnews_articles = extract_from_gnews()
     if gnews_articles:
-        print(f"[etl] GNews contributed {len(gnews_articles)} articles.")
+        print(f"[etl] GNews contributed {len(gnews_articles)} articles (across all queries).")
     articles.extend(gnews_articles)
     return articles
 
@@ -295,6 +332,14 @@ def run() -> None:
     gc.collect()
 
     print(f"[etl] Upserted {total_upserted} hybrid points into '{collection}'.")
+
+    # ── Publisher summary (top 10) ────────────────────────────────────────
+    from collections import Counter
+    counts = Counter(art["publisher"] for art in articles)
+    print("[etl] Articles per publisher (top 10):")
+    for publisher, count in counts.most_common(10):
+        print(f"  {count:>5}  {publisher}")
+
     print("[etl] Done.")
 
 

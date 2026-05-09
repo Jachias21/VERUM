@@ -22,6 +22,27 @@ from app.rag import hybrid_search, synthesize_verdict, _extract_verdict_from_llm
 load_dotenv()
 
 
+_NO_INFO_PHRASES = (
+    "no tengo información",
+    "no menciona",
+    "no puedo confirmar",
+    "no hay información",
+    "no se menciona",
+    "sin información",
+    # English equivalents
+    "no information",
+    "cannot confirm",
+    "can't confirm",
+    "no relevant",
+)
+
+
+def _is_no_info_response(text: str) -> bool:
+    """Return True if the LLM summary indicates it could not find relevant info."""
+    lower = text.lower()
+    return any(phrase in lower for phrase in _NO_INFO_PHRASES)
+
+
 async def _send_telegram_reply(chat_id: int, text: str) -> None:
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
@@ -56,6 +77,17 @@ async def process(message: aio_pika.abc.AbstractIncomingMessage) -> None:
             )
             result.summary = await synthesize_verdict(task.text, result)
 
+            # Override reply when the LLM had no relevant context to work with
+            _no_info_override = _is_no_info_response(result.summary)
+            if _no_info_override:
+                result.verdict = "UNVERIFIED"
+                result.summary = (
+                    "No encontré información verificada sobre esto.\n\n"
+                    "No tenemos esta noticia en nuestra base de datos ni en fuentes de "
+                    "fact-checking. Esto no significa que sea falsa — simplemente no hay registros.\n\n"
+                    "💡 Comprueba en: maldita.es · newtral.es · snopes.com"
+                )
+
             # Override verdict with LLM output when it follows the expected format
             llm_verdict = _extract_verdict_from_llm_output(result.summary)
             if llm_verdict is not None:
@@ -84,12 +116,15 @@ async def process(message: aio_pika.abc.AbstractIncomingMessage) -> None:
 
             # ── GAP 2: Send Telegram reply ────────────────────────────────────────
             if task.chat_id:
-                verdict_emoji = {"FAKE": "🔴", "REAL": "🟢", "UNVERIFIED": "🟡"}.get(result.verdict, "⚪")
-                reply = (
-                    f"{verdict_emoji} *Veredicto: {result.verdict}*\n\n"
-                    f"{result.summary}\n\n"
-                    f"📎 Fuente: {result.source_url or 'Sin coincidencias en la base de datos.'}"
-                )
+                if _no_info_override:
+                    reply = "🟡 *No encontré información verificada sobre esto.*\n\n" + result.summary
+                else:
+                    verdict_emoji = {"FAKE": "🔴", "REAL": "🟢", "UNVERIFIED": "🟡"}.get(result.verdict, "⚪")
+                    reply = (
+                        f"{verdict_emoji} *Veredicto: {result.verdict}*\n\n"
+                        f"{result.summary}\n\n"
+                        f"📎 Fuente: {result.source_url or 'Sin coincidencias en la base de datos.'}"
+                    )
                 await _send_telegram_reply(task.chat_id, reply)
 
             print(f"[nlp] {task.query_id} → {result.verdict} ({elapsed_ms}ms)")

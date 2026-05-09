@@ -11,8 +11,10 @@ Architecture:
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import re
+import time
 import uuid
 
 import httpx
@@ -22,6 +24,8 @@ from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import Fusion, FusionQuery, Prefetch, SparseVector
 from shared.schemas import NLPResult
 from models.nlp.embeddings import embed, sparse_embed
+
+logger = logging.getLogger(__name__)
 
 
 async def hybrid_search(
@@ -34,6 +38,20 @@ async def hybrid_search(
     Returns a partially-filled NLPResult (summary is filled by synthesize_verdict).
     """
     threshold = float(os.getenv("NLP_CONFIDENCE_THRESHOLD", 0.75))
+    min_relevance = float(os.getenv("NLP_MIN_ARTICLE_SCORE", 0.40))
+
+    # ── Early exit: no entities and text too short to search meaningfully ─────
+    if not entities and len(text) < 20:
+        return NLPResult(
+            query_id=query_id,
+            extracted_entities=[],
+            fact_check_matches=0,
+            verdict="UNVERIFIED",
+            summary=(
+                "El texto es demasiado corto o no contiene entidades detectables. "
+                "Envíame una afirmación o noticia completa para poder verificarla."
+            ),
+        )
 
     # ── Level 1: Local Qdrant hybrid search ──────────────────────────────────
     query_terms = entities if entities else [text[:200]]  # graceful degradation
@@ -41,26 +59,37 @@ async def hybrid_search(
 
     if local_hits and local_hits[0]["score"] >= threshold:
         best = local_hits[0]
-        return NLPResult(
-            query_id=query_id,
-            extracted_entities=entities,
-            fact_check_matches=len(local_hits),
-            source_url=best.get("url"),
-            verdict=best.get("verdict", "UNVERIFIED"),
-            summary=best.get("text", ""),  # article text passed to synthesize_verdict for LLM inference
-        )
+        # Discard if article body or title is empty (badly formatted entry)
+        if not best.get("text", "").strip():
+            logger.info(
+                "[rag] Discarding L1 hit (empty article body) score=%.3f for query_id=%s",
+                best["score"], query_id,
+            )
+        else:
+            return NLPResult(
+                query_id=query_id,
+                extracted_entities=entities,
+                fact_check_matches=len(local_hits),
+                source_url=best.get("url"),
+                verdict=best.get("verdict", "UNVERIFIED"),
+                summary=best.get("text", ""),  # article text passed to synthesize_verdict for LLM inference
+            )
 
     # ── Level 2: parallel fallback (Google Fact Check + GNews) ─────────────────
     l2_query = " ".join(entities) if entities else text[:200]
     l1_score = local_hits[0]["score"] if local_hits else 0.0
 
+    logger.info(
+        "[rag] L1 miss (score=%.3f, threshold=%.2f) — activating L2 fallback for query_id=%s",
+        l1_score, threshold, query_id,
+    )
     google_hits, gnews_hits = await asyncio.gather(
         _search_google_fact_check(l2_query),
         _search_gnews(l2_query),
     )
-    print(
-        f"[rag] L1 miss (score={l1_score:.3f}), activating L2 fallback — "
-        f"Google: {len(google_hits)}, GNews: {len(gnews_hits)}"
+    logger.info(
+        "[rag] L2 results — Google: %d, GNews: %d for query_id=%s",
+        len(google_hits), len(gnews_hits), query_id,
     )
 
     if google_hits:
@@ -85,16 +114,22 @@ async def hybrid_search(
             summary=best.get("text", ""),
         )
 
-    # L2 also empty — use best local hit if available so LLM can still infer
+    # L2 also empty — use best local hit only if relevance score is acceptable
     if local_hits:
         best = local_hits[0]
-        return NLPResult(
-            query_id=query_id,
-            extracted_entities=entities,
-            fact_check_matches=len(local_hits),
-            source_url=best.get("url"),
-            verdict=best.get("verdict", "UNVERIFIED"),
-            summary=best.get("text", ""),
+        score = best["score"]
+        if score >= min_relevance:
+            return NLPResult(
+                query_id=query_id,
+                extracted_entities=entities,
+                fact_check_matches=len(local_hits),
+                source_url=best.get("url"),
+                verdict=best.get("verdict", "UNVERIFIED"),
+                summary=best.get("text", ""),
+            )
+        logger.info(
+            "[rag] Discarding local hit score=%.3f < MIN_RELEVANCE=%.2f for query_id=%s",
+            score, min_relevance, query_id,
         )
 
     return NLPResult(
@@ -146,6 +181,7 @@ async def synthesize_verdict(text: str, result: NLPResult) -> str:
         ),
     )
 
+    logger.info("[rag] Ollama synthesis — model=%s url=%s", model_name, ollama_url)
     llm = OllamaLLM(base_url=ollama_url, model=model_name, temperature=0.0)  # type: ignore[call-arg]
     chain = prompt | llm
 
@@ -154,12 +190,19 @@ async def synthesize_verdict(text: str, result: NLPResult) -> str:
 
     for attempt in range(MAX_RETRIES + 1):
         try:
+            t0 = time.monotonic()
             verdict_text: str = await asyncio.wait_for(
                 chain.ainvoke({"message_text": text, "retrieved_article": retrieved_article}),
                 timeout=OLLAMA_TIMEOUT_SECONDS,
             )
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            logger.info("[rag] Ollama responded in %dms (attempt=%d)", elapsed_ms, attempt + 1)
             return verdict_text.strip()
         except asyncio.TimeoutError:
+            logger.warning(
+                "[rag] Ollama timeout after %ds (attempt=%d/%d)",
+                OLLAMA_TIMEOUT_SECONDS, attempt + 1, MAX_RETRIES + 1,
+            )
             if attempt == MAX_RETRIES:
                 return (
                     f"Veredicto: {result.verdict}\n"
@@ -167,7 +210,7 @@ async def synthesize_verdict(text: str, result: NLPResult) -> str:
                 )
             await asyncio.sleep(2 ** attempt)
         except Exception as exc:
-            print(f"[rag] Ollama synthesis error (attempt {attempt + 1}): {exc}")
+            logger.error("[rag] Ollama synthesis error (attempt %d/%d): %s", attempt + 1, MAX_RETRIES + 1, exc)
             if attempt == MAX_RETRIES:
                 return f"Veredicto: {result.verdict}\nFuente: {result.source_url or 'N/A'}"
             await asyncio.sleep(2 ** attempt)
@@ -238,7 +281,7 @@ async def _search_qdrant(entities: list[str]) -> list[dict]:
         )
         hits = response.points
     except Exception as exc:  # noqa: BLE001
-        print(f"[rag] Qdrant hybrid search failed: {exc}")
+        logger.error("[rag] Qdrant hybrid search failed: %s", exc)
         return []
 
     results = []
@@ -255,6 +298,8 @@ async def _search_qdrant(entities: list[str]) -> list[dict]:
             "verdict": stored_verdict,
             "text": article_text,
         })
+    top_score = results[0]["score"] if results else 0.0
+    logger.info("[rag] Qdrant returned %d hits, top_score=%.3f", len(results), top_score)
     return results
 
 
@@ -281,7 +326,9 @@ async def _search_google_fact_check(query: str) -> list[dict]:
     """
     api_key = os.getenv("GOOGLE_FACT_CHECK_API_KEY", "")
     if not api_key:
+        logger.warning("[rag] Google FC API: key not configured — skipping")
         return []
+    logger.info("[rag] Google FC API: key_present=True, querying...")
     url = "https://factchecktools.googleapis.com/v1alpha1/claims:search"
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -289,17 +336,23 @@ async def _search_google_fact_check(query: str) -> list[dict]:
                 url, params={"query": query, "key": api_key, "languageCode": "es"}
             )
             if resp.status_code != 200:
+                logger.warning("[rag] Google FC API returned HTTP %d", resp.status_code)
                 return []
             claims = resp.json().get("claims", [])
             if claims:
-                return _parse_google_claims(claims)
+                result = _parse_google_claims(claims)
+                logger.info("[rag] Google FC returned %d claims for query=%.60r", len(result), query)
+                return result
             # Retry without languageCode for broader coverage
             resp2 = await client.get(url, params={"query": query, "key": api_key})
             if resp2.status_code != 200:
+                logger.warning("[rag] Google FC API (retry) returned HTTP %d", resp2.status_code)
                 return []
-            return _parse_google_claims(resp2.json().get("claims", []))
+            result = _parse_google_claims(resp2.json().get("claims", []))
+            logger.info("[rag] Google FC (retry, no lang) returned %d claims for query=%.60r", len(result), query)
+            return result
     except Exception as exc:
-        print(f"[rag] Google Fact Check API error: {exc}")
+        logger.error("[rag] Google Fact Check API error: %s", exc)
         return []
 
 
@@ -310,7 +363,9 @@ async def _search_gnews(query: str) -> list[dict]:
     """
     api_key = os.getenv("GNEWS_API_KEY", "")
     if not api_key:
+        logger.warning("[rag] GNews API: key not configured — skipping")
         return []
+    logger.info("[rag] GNews API: key_present=True, querying...")
     url = f"https://gnews.io/api/v4/search?q={query}&lang=es&token={api_key}&max=5"
     try:
         async with httpx.AsyncClient(timeout=8) as client:
@@ -318,7 +373,7 @@ async def _search_gnews(query: str) -> list[dict]:
             resp.raise_for_status()
             articles = resp.json().get("articles", [])
     except Exception as exc:
-        print(f"[rag] GNews API error: {exc}")
+        logger.error("[rag] GNews API error: %s", exc)
         return []
     results = []
     for article in articles:
@@ -331,6 +386,7 @@ async def _search_gnews(query: str) -> list[dict]:
             "url": article.get("url", ""),
             "text": f"{title}. {description}".strip(". "),
         })
+    logger.info("[rag] GNews returned %d articles for query=%.60r", len(results), query)
     return results
 
 
