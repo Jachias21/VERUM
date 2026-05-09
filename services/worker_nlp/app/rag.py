@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import uuid
 
 import httpx
@@ -172,6 +173,27 @@ async def synthesize_verdict(text: str, result: NLPResult) -> str:
             await asyncio.sleep(2 ** attempt)
     # Unreachable, but satisfies type checkers
     return f"Veredicto: {result.verdict}\nFuente: {result.source_url or 'N/A'}"
+
+
+def _extract_verdict_from_llm_output(text: str) -> str | None:
+    """
+    Parse free-form LLM output and return a canonical verdict string.
+    Returns "FAKE", "REAL", or "UNVERIFIED", or None if nothing matches.
+    Checks Spanish labels first (VEREDICTO:), then English (VERDICT:).
+    """
+    if re.search(r"veredicto:\s*no[\s_]verificado", text, re.IGNORECASE):
+        return "UNVERIFIED"
+    if re.search(r"veredicto:\s*falso", text, re.IGNORECASE):
+        return "FAKE"
+    if re.search(r"veredicto:\s*verdadero", text, re.IGNORECASE):
+        return "REAL"
+    if re.search(r"verdict:\s*unverified", text, re.IGNORECASE):
+        return "UNVERIFIED"
+    if re.search(r"verdict:\s*(fake|false)", text, re.IGNORECASE):
+        return "FAKE"
+    if re.search(r"verdict:\s*(true|real)", text, re.IGNORECASE):
+        return "REAL"
+    return None
 
 
 # ── Private helpers ───────────────────────────────────────────────────────────

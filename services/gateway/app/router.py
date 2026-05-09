@@ -2,6 +2,7 @@
 Message router — classifies incoming Telegram payloads and publishes
 tasks to the appropriate RabbitMQ queue.
 """
+import asyncio
 import os
 import hashlib
 import logging
@@ -9,8 +10,29 @@ import uuid
 from datetime import datetime, timezone
 
 import aio_pika
+from telegram import Bot
 
 logger = logging.getLogger(__name__)
+
+
+async def _send_interim_message(chat_id: int, text: str) -> None:
+    """Send a fire-and-forget acknowledgment to the user via Telegram."""
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    if not token:
+        logger.warning(
+            "_send_interim_message: TELEGRAM_BOT_TOKEN not set — skipping interim to chat_id=%s",
+            chat_id,
+        )
+        return
+    try:
+        bot = Bot(token=token)
+        await bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown")
+    except Exception as e:  # noqa: BLE001
+        logger.warning(
+            "_send_interim_message: failed to send interim to chat_id=%s — %s: %s",
+            chat_id, type(e).__name__, e,
+        )
+
 
 # Lazy singleton connection
 _connection: aio_pika.abc.AbstractRobustConnection | None = None
@@ -61,6 +83,15 @@ async def route_message(payload: dict) -> None:
                 len(text), min_length, chat_id,
             )
             return
+        # Send interim acknowledgment (fire-and-forget) for non-command texts
+        if not text.startswith("/"):
+            asyncio.create_task(
+                _send_interim_message(
+                    chat_id,
+                    "🔍 Analizando tu mensaje... Esto puede tardar hasta 15 segundos.",
+                )
+            )
+
         task = TextTask(
             query_id=query_id,
             user_hash=user_hash,
