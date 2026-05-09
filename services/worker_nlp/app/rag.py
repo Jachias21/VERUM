@@ -46,28 +46,61 @@ async def hybrid_search(
             fact_check_matches=len(local_hits),
             source_url=best.get("url"),
             verdict=best.get("verdict", "UNVERIFIED"),
-            summary=best.get("text", ""),  # article text; overwritten by synthesize_verdict
+            summary=best.get("text", ""),  # article text passed to synthesize_verdict for LLM inference
         )
 
-    # ── Level 2: Google Fact Check Tools API fallback ─────────────────────────
-    api_hits = await _search_google_fact_check(" ".join(entities))
+    # ── Level 2: parallel fallback (Google Fact Check + GNews) ─────────────────
+    l2_query = " ".join(entities) if entities else text[:200]
+    l1_score = local_hits[0]["score"] if local_hits else 0.0
 
-    if not api_hits:
+    google_hits, gnews_hits = await asyncio.gather(
+        _search_google_fact_check(l2_query),
+        _search_gnews(l2_query),
+    )
+    print(
+        f"[rag] L1 miss (score={l1_score:.3f}), activating L2 fallback — "
+        f"Google: {len(google_hits)}, GNews: {len(gnews_hits)}"
+    )
+
+    if google_hits:
+        best = google_hits[0]
         return NLPResult(
             query_id=query_id,
             extracted_entities=entities,
-            fact_check_matches=0,
-            verdict="UNVERIFIED",
-            summary="",
+            fact_check_matches=len(google_hits),
+            source_url=best.get("url"),
+            verdict=best.get("verdict", "UNVERIFIED"),
+            summary=best.get("text", ""),
         )
 
-    best = api_hits[0]
+    if gnews_hits:
+        best = gnews_hits[0]
+        return NLPResult(
+            query_id=query_id,
+            extracted_entities=entities,
+            fact_check_matches=len(gnews_hits),
+            source_url=best.get("url"),
+            verdict=best.get("verdict", "UNVERIFIED"),
+            summary=best.get("text", ""),
+        )
+
+    # L2 also empty — use best local hit if available so LLM can still infer
+    if local_hits:
+        best = local_hits[0]
+        return NLPResult(
+            query_id=query_id,
+            extracted_entities=entities,
+            fact_check_matches=len(local_hits),
+            source_url=best.get("url"),
+            verdict=best.get("verdict", "UNVERIFIED"),
+            summary=best.get("text", ""),
+        )
+
     return NLPResult(
         query_id=query_id,
         extracted_entities=entities,
-        fact_check_matches=len(api_hits),
-        source_url=best.get("url"),
-        verdict=best.get("verdict", "UNVERIFIED"),
+        fact_check_matches=0,
+        verdict="UNVERIFIED",
         summary="",
     )
 
@@ -104,6 +137,10 @@ async def synthesize_verdict(text: str, result: NLPResult) -> str:
             "3 a 4 líneas explicando si el mensaje viral es verdadero o falso y por qué. "
             "Sé conciso, directo y cita el artículo. "
             "Escribe en párrafo continuo, sin viñetas ni listas.\n\n"
+            "Si el artículo de referencia describe claramente un bulo, fraude o contenido "
+            "falso, el veredicto debe comenzar con 'VEREDICTO: FALSO'. "
+            "Si confirma la veracidad, debe comenzar con 'VEREDICTO: VERDADERO'. "
+            "Si no hay suficiente información, usar 'VEREDICTO: NO VERIFICADO'.\n\n"
             "VEREDICTO:"
         ),
     )
@@ -186,41 +223,110 @@ async def _search_qdrant(entities: list[str]) -> list[dict]:
     for hit in hits:
         payload = hit.payload or {}
         article_text = f"{payload.get('title', '')} {payload.get('summary', '')}".strip()
+        stored_verdict = payload.get("verdict", "UNVERIFIED")
+        # Re-infer from article text when the stored verdict carries no signal
+        if stored_verdict in ("UNVERIFIED", "", None):
+            stored_verdict = _normalise_rating(article_text)
         results.append({
             "score": hit.score,
             "url": payload.get("url", ""),
-            "verdict": payload.get("verdict", _normalise_rating(article_text)),  # stored field first, fallback for old points
+            "verdict": stored_verdict,
             "text": article_text,
         })
     return results
 
 
-async def _search_google_fact_check(query: str) -> list[dict]:
-    """Call Google Fact Check Tools API and normalise results."""
-    api_key = os.getenv("GOOGLE_FACT_CHECK_API_KEY", "")
-    if not api_key:
-        return []
-    url = "https://factchecktools.googleapis.com/v1alpha1/claims:search"
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(url, params={"query": query, "key": api_key, "languageCode": "es"})
-    if resp.status_code != 200:
-        return []
-    claims = resp.json().get("claims", [])
+def _parse_google_claims(claims: list) -> list[dict]:
     results = []
     for claim in claims:
         review = claim.get("claimReview", [{}])[0]
+        claim_text = claim.get("text", "")
+        rating_text = review.get("textualRating", "")
         results.append({
-            "score": 1.0,   # API results always treated as high confidence
-            "verdict": _normalise_rating(review.get("textualRating", "")),
+            "score": 1.0,  # API results always treated as high confidence
+            "verdict": _normalise_rating(rating_text + " " + claim_text),
             "url": review.get("url", ""),
+            "text": f"{claim_text} — {rating_text}".strip(" —"),
         })
     return results
 
 
+async def _search_google_fact_check(query: str) -> list[dict]:
+    """Call Google Fact Check Tools API and normalise results.
+
+    First attempts with languageCode=es; if that returns 0 claims, retries
+    without languageCode to capture Latin-American fact-checks.
+    """
+    api_key = os.getenv("GOOGLE_FACT_CHECK_API_KEY", "")
+    if not api_key:
+        return []
+    url = "https://factchecktools.googleapis.com/v1alpha1/claims:search"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                url, params={"query": query, "key": api_key, "languageCode": "es"}
+            )
+            if resp.status_code != 200:
+                return []
+            claims = resp.json().get("claims", [])
+            if claims:
+                return _parse_google_claims(claims)
+            # Retry without languageCode for broader coverage
+            resp2 = await client.get(url, params={"query": query, "key": api_key})
+            if resp2.status_code != 200:
+                return []
+            return _parse_google_claims(resp2.json().get("claims", []))
+    except Exception as exc:
+        print(f"[rag] Google Fact Check API error: {exc}")
+        return []
+
+
+async def _search_gnews(query: str) -> list[dict]:
+    """Search GNews API for fact-check related articles.
+
+    Returns [] silently when GNEWS_API_KEY is absent or the request fails.
+    """
+    api_key = os.getenv("GNEWS_API_KEY", "")
+    if not api_key:
+        return []
+    url = f"https://gnews.io/api/v4/search?q={query}&lang=es&token={api_key}&max=5"
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            articles = resp.json().get("articles", [])
+    except Exception as exc:
+        print(f"[rag] GNews API error: {exc}")
+        return []
+    results = []
+    for article in articles:
+        title = article.get("title", "")
+        description = article.get("description", "") or ""
+        combined = f"{title} {description}"
+        results.append({
+            "score": 0.7,
+            "verdict": _normalise_rating(combined),
+            "url": article.get("url", ""),
+            "text": f"{title}. {description}".strip(". "),
+        })
+    return results
+
+
+_FAKE_KEYWORDS = [
+    "falso", "false", "fake", "bulo", "hoax", "incorrecto", "desinformación",
+    "engaño", "manipulado", "mentira", "no es cierto", "sin evidencia",
+    "misleading", "misinformation", "debunked", "desmentido", "incorrect",
+]
+_REAL_KEYWORDS = [
+    "verdadero", "true", "correcto", "verified", "confirmado", "cierto",
+    "demostrado", "correct",
+]
+
+
 def _normalise_rating(rating: str) -> str:
     rating_lower = rating.lower()
-    if any(w in rating_lower for w in ["falso", "false", "fake", "incorrect", "incorrecto"]):
+    if any(w in rating_lower for w in _FAKE_KEYWORDS):
         return "FAKE"
-    if any(w in rating_lower for w in ["verdadero", "true", "correct", "correcto"]):
+    if any(w in rating_lower for w in _REAL_KEYWORDS):
         return "REAL"
     return "UNVERIFIED"
