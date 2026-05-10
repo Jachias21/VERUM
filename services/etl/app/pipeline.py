@@ -233,7 +233,7 @@ def extract() -> list[dict]:
     return articles
 
 
-BATCH_SIZE = 20  # max articles per embedding + upsert cycle to avoid OOM
+BATCH_SIZE = 5  # max articles per embedding + upsert cycle to avoid OOM
 
 
 def _ensure_collection(client: QdrantClient, collection: str) -> None:
@@ -298,9 +298,9 @@ def transform(articles: list[dict]) -> list[PointStruct]:
     import gc
 
     print("[etl] Loading dense model (multilingual-e5-large, ONNX)…")
-    dense_model = TextEmbedding(model_name="intfloat/multilingual-e5-large")
+    dense_model = TextEmbedding(model_name="intfloat/multilingual-e5-large", threads=2)
     print("[etl] Loading sparse model (Qdrant/bm25)…")
-    sparse_model = SparseTextEmbedding(model_name="Qdrant/bm25")
+    sparse_model = SparseTextEmbedding(model_name="Qdrant/bm25", threads=2)
 
     points = _embed_batch(articles, dense_model, sparse_model)
 
