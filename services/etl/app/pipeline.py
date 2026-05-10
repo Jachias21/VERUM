@@ -233,7 +233,7 @@ def extract() -> list[dict]:
     return articles
 
 
-BATCH_SIZE = 5  # max articles per embedding + upsert cycle to avoid OOM
+BATCH_SIZE = 10  # max articles per embedding + upsert cycle to avoid OOM
 
 
 def _ensure_collection(client: QdrantClient, collection: str) -> None:
