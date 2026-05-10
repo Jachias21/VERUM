@@ -16,10 +16,18 @@ logger = logging.getLogger(__name__)
 
 from shared.db import get_mongo_db
 from shared.schemas import TextTask, NLPResult, QueryLog
-from app.ner import extract_entities
+from app.ner import extract_entities, is_gibberish
 from app.rag import hybrid_search, synthesize_verdict, _extract_verdict_from_llm_output
 
 load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[logging.StreamHandler()],
+    force=True,
+)
 
 
 _NO_INFO_PHRASES = (
@@ -69,6 +77,18 @@ async def process(message: aio_pika.abc.AbstractIncomingMessage) -> None:
         try:
             task = TextTask.model_validate_json(message.body)
             start = time.monotonic()
+
+            if is_gibberish(task.text):
+                logger.warning(
+                    "[nlp] Gibberish detected for query_id=%s, skipping pipeline",
+                    task.query_id,
+                )
+                if task.chat_id:
+                    await _send_telegram_reply(
+                        task.chat_id,
+                        "⚠️ No he podido entender tu mensaje. Por favor, envíame una noticia o afirmación completa en español o inglés.",
+                    )
+                return
 
             entities = extract_entities(task.text)
             result: NLPResult = await asyncio.wait_for(

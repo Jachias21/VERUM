@@ -7,7 +7,6 @@ from __future__ import annotations
 import os
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
-from qdrant_client import QdrantClient
 
 
 def get_mongo_db() -> AsyncIOMotorDatabase:
@@ -19,7 +18,8 @@ def get_mongo_db() -> AsyncIOMotorDatabase:
     return client[os.environ["MONGO_DB"]]
 
 
-def get_qdrant_client() -> QdrantClient:
+def get_qdrant_client():
+    from qdrant_client import QdrantClient  # lazy import — not available in worker_vision
     return QdrantClient(
         host=os.environ["QDRANT_HOST"],
         port=int(os.environ["QDRANT_PORT"]),

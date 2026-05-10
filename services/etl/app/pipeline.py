@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import socket
+import ssl
 import uuid
 
 import feedparser
@@ -167,18 +168,36 @@ def extract_from_gnews() -> list[dict]:
     return list(seen.values())
 
 
+def _validate_article(article: dict) -> bool:
+    """Return True only if the article has a usable title, summary, and URL."""
+    title = article.get("title", "")
+    summary = article.get("summary", "")
+    url = article.get("url", "")
+    return len(title) >= 10 and len(summary) >= 20 and url.startswith("http")
+
+
 def extract() -> list[dict]:
     """Pull latest articles from RSS feeds and GNews API."""
-    socket.setdefaulttimeout(10)
-    articles = []
+    articles: list[dict] = []
+    feeds_ok = 0
+    feeds_empty = 0
+    feeds_failed = 0
+    raw_count = 0
+
     for url in RSS_FEEDS:
+        old_timeout = socket.getdefaulttimeout()
+        socket.setdefaulttimeout(15)
         try:
             feed = feedparser.parse(url)
+            if not feed.entries:
+                feeds_empty += 1
+                continue
+            feeds_ok += 1
             publisher = feed.feed.get("title", "")
             for entry in feed.entries:
                 raw_summary = entry.get("summary", "")
                 clean_summary = BeautifulSoup(raw_summary, "html.parser").get_text(separator=" ", strip=True)
-                articles.append({
+                article = {
                     "id": str(uuid.uuid5(uuid.NAMESPACE_URL, entry.get("link", ""))),
                     "title": entry.get("title", ""),
                     "summary": clean_summary,
@@ -186,9 +205,26 @@ def extract() -> list[dict]:
                     "publisher": publisher,
                     "published": entry.get("published", ""),
                     "verdict": _infer_verdict_from_entry(entry, publisher),
-                })
+                }
+                raw_count += 1
+                if _validate_article(article):
+                    articles.append(article)
+        except (socket.timeout, TimeoutError):
+            print(f"[etl] TIMEOUT: {url}")
+            feeds_failed += 1
+        except ssl.SSLError:
+            print(f"[etl] SSL_ERROR: {url}")
+            feeds_failed += 1
         except Exception as exc:
-            print(f"[etl] Failed to parse feed {url!r}, skipping: {exc}")
+            print(f"[etl] FAILED ({type(exc).__name__}): {url} — {exc}")
+            feeds_failed += 1
+        finally:
+            socket.setdefaulttimeout(old_timeout)
+
+    discarded = raw_count - len(articles)
+    if discarded:
+        print(f"[etl] Discarded {discarded} articles with empty title/summary/url")
+    print(f"[etl] Feed summary: {feeds_ok} OK / {feeds_empty} empty / {feeds_failed} failed")
 
     gnews_articles = extract_from_gnews()
     if gnews_articles:
@@ -291,7 +327,7 @@ def run() -> None:
 
     print("[etl] Starting hybrid ETL pipeline…")
     articles = extract()
-    print(f"[etl] Extracted {len(articles)} articles.")
+    print(f"[etl] Extracted {len(articles)} articles (valid).")
 
     # ── Setup Qdrant (collection recreated once, before any upserts) ────────
     client = QdrantClient(

@@ -25,7 +25,7 @@ from qdrant_client.models import Fusion, FusionQuery, Prefetch, SparseVector
 from shared.schemas import NLPResult
 from models.nlp.embeddings import embed, sparse_embed
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("verum.rag")
 
 
 async def hybrid_search(
@@ -40,8 +40,14 @@ async def hybrid_search(
     threshold = float(os.getenv("NLP_CONFIDENCE_THRESHOLD", 0.75))
     min_relevance = float(os.getenv("NLP_MIN_ARTICLE_SCORE", 0.40))
 
+    logger.info(
+        "hybrid_search: query_id=%s, entities=%s",
+        query_id, entities,
+    )
+
     # ── Early exit: no entities and text too short to search meaningfully ─────
     if not entities and len(text) < 20:
+        logger.warning("hybrid_search: early-exit — text too short and no entities for query_id=%s", query_id)
         return NLPResult(
             query_id=query_id,
             extracted_entities=[],
@@ -56,6 +62,12 @@ async def hybrid_search(
     # ── Level 1: Local Qdrant hybrid search ──────────────────────────────────
     query_terms = entities if entities else [text[:200]]  # graceful degradation
     local_hits = await _search_qdrant(query_terms)
+
+    top_score = local_hits[0]["score"] if local_hits else 0.0
+    logger.info(
+        "Qdrant returned %d hits, top_score=%.3f for query_id=%s",
+        len(local_hits), top_score, query_id,
+    )
 
     if local_hits and local_hits[0]["score"] >= threshold:
         best = local_hits[0]
@@ -79,8 +91,8 @@ async def hybrid_search(
     l2_query = " ".join(entities) if entities else text[:200]
     l1_score = local_hits[0]["score"] if local_hits else 0.0
 
-    logger.info(
-        "[rag] L1 miss (score=%.3f, threshold=%.2f) — activating L2 fallback for query_id=%s",
+    logger.warning(
+        "L1 miss (score=%.3f, threshold=%.2f) — activating L2 fallback for query_id=%s",
         l1_score, threshold, query_id,
     )
     google_hits, gnews_hits = await asyncio.gather(
@@ -88,7 +100,7 @@ async def hybrid_search(
         _search_gnews(l2_query),
     )
     logger.info(
-        "[rag] L2 results — Google: %d, GNews: %d for query_id=%s",
+        "L2 results — Google FC returned %d claims, GNews returned %d articles for query_id=%s",
         len(google_hits), len(gnews_hits), query_id,
     )
 
@@ -196,8 +208,12 @@ async def synthesize_verdict(text: str, result: NLPResult) -> str:
                 timeout=OLLAMA_TIMEOUT_SECONDS,
             )
             elapsed_ms = int((time.monotonic() - t0) * 1000)
-            logger.info("[rag] Ollama responded in %dms (attempt=%d)", elapsed_ms, attempt + 1)
-            return verdict_text.strip()
+            verdict_stripped = verdict_text.strip()
+            logger.info(
+                "Ollama responded in %dms (attempt=%d): %r",
+                elapsed_ms, attempt + 1, verdict_stripped[:150],
+            )
+            return verdict_stripped
         except asyncio.TimeoutError:
             logger.warning(
                 "[rag] Ollama timeout after %ds (attempt=%d/%d)",

@@ -73,6 +73,8 @@ services:
       dockerfile: services/worker_vision/Dockerfile
     container_name: verum_worker_vision
     env_file: .env
+    environment:
+      PYTHONUNBUFFERED: "1"
     depends_on:
       rabbitmq:
         condition: service_healthy
