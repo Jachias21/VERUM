@@ -7,8 +7,7 @@ feedparser    # RSS parsing
 beautifulsoup4   # HTML scraping
 
 # Transformation
-sentence-transformers    # BAAI/bge-m3 dense embeddings
-rank-bm25                # sparse BM25 vectors
+fastembed>=0.3.0         # BAAI/bge-m3 dense (ONNX) + Qdrant/bm25 sparse vectors
 
 # Load
-qdrant-client
+qdrant-client>=1.9.0

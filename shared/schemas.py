@@ -17,12 +17,14 @@ class ImageTask(BaseModel):
     query_id: uuid.UUID = Field(default_factory=uuid.uuid4)
     user_hash: str                      # SHA-256 of Telegram user_id (GDPR-safe)
     telegram_file_id: str
+    chat_id: int
     timestamp: datetime.datetime
 
 
 class TextTask(BaseModel):
     query_id: uuid.UUID = Field(default_factory=uuid.uuid4)
     user_hash: str
+    chat_id: int
     text: str
     timestamp: datetime.datetime
 

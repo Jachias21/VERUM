@@ -75,6 +75,8 @@ services:
       - PYTHONUNBUFFERED=1
     container_name: verum_worker_vision
     env_file: .env
+    environment:
+      PYTHONUNBUFFERED: "1"
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -92,6 +94,9 @@ services:
       - PYTHONUNBUFFERED=1
     container_name: verum_worker_nlp
     env_file: .env
+    environment:
+      PYTHONUNBUFFERED: "1"
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
     depends_on:
       rabbitmq:
         condition: service_healthy
