@@ -1,8 +1,9 @@
 FROM python:3.11-slim
 WORKDIR /app
-COPY requirements.txt .
+COPY services/etl/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY app/ ./app/
-COPY ../../shared ./shared/
+COPY services/etl/app/ ./app/
+COPY shared/ ./shared/
 
 CMD ["python", "-m", "app.pipeline"]
+
