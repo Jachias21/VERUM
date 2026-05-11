@@ -31,6 +31,7 @@ async def route_message(payload: dict) -> None:
 
     user_id = str(message.get("from", {}).get("id", "unknown"))
     user_hash = hashlib.sha256(user_id.encode()).hexdigest()
+    chat_id: int = message.get("chat", {}).get("id", 0)
     query_id = str(uuid.uuid4())
     timestamp = datetime.now(timezone.utc).isoformat()
 
@@ -41,6 +42,7 @@ async def route_message(payload: dict) -> None:
             query_id=query_id,
             user_hash=user_hash,
             telegram_file_id=file_id,
+            chat_id=chat_id,
             timestamp=timestamp,
         )
         queue = os.getenv("RABBITMQ_QUEUE_IMAGES", "topic_images")
