@@ -76,8 +76,8 @@ def train(epochs: int, batch_size: int, lr: float, data_root: Path, output_dir: 
 
     train_ds = datasets.ImageFolder(data_root / "train", transform=get_transforms(train=True))
     val_ds   = datasets.ImageFolder(data_root / "val",   transform=get_transforms(train=False))
-    train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True,  num_workers=4, pin_memory=True)
-    val_dl   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True)
+    train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True,  num_workers=0, pin_memory=True)
+    val_dl   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=True)
 
     # Verificar que las clases están en el orden correcto (fake=0, real=1)
     print(f"[train] Clases detectadas: {train_ds.class_to_idx}")

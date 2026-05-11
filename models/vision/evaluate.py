@@ -151,13 +151,16 @@ def evaluate(
 
             # El modelo devuelve P(fake) ∈ [0, 1] con sigmoid
             scores = model(imgs, freq).squeeze(1).cpu()  # (B,)
-            preds  = (scores >= 0.5).int()
-
-            # Si fake_idx = 1, los scores ya representan P(fake).
-            # Si fake_idx = 0, invertimos para que AUC sea coherente.
-            adjusted_scores = scores if fake_idx == 1 else (1.0 - scores)
-            # Labels binarizados: 1 si es fake, 0 si es real
-            binary_labels   = (labels == fake_idx).int()
+            # scores = P(fake) según el modelo
+            # fake_idx=0 significa que ImageFolder asignó 0 a fake
+            # necesitamos invertir la lógica si fake_idx=0
+            if fake_idx == 0:
+                preds = (scores < 0.5).int()
+                adjusted_scores = 1.0 - scores
+            else:
+                preds = (scores >= 0.5).int()
+                adjusted_scores = scores
+            binary_labels = (labels == fake_idx).int()
 
             all_labels.extend(binary_labels.tolist())
             all_preds.extend(preds.tolist())

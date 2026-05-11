@@ -7,7 +7,7 @@ CIFAKE_ROOT = Path("data/raw")
 OUTPUT_ROOT = Path("data/processed")
 VAL_RATIO   = 0.15
 SEED        = 42
-"""
+
 random.seed(SEED)
 
 def split_and_copy(src_dir: Path, split: str, label: str):
@@ -37,7 +37,7 @@ for split in ["train", "test"]:
         print(f"{split}/{label}: {total} imágenes procesadas")
 
 print("\n✓ Dataset organizado en data/processed/")
-"""
+
 # Verificación final
 for split in ["train", "val", "test"]:
     for label in ["real", "fake"]:
