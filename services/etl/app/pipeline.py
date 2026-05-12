@@ -236,12 +236,21 @@ def extract() -> list[dict]:
 BATCH_SIZE = 10  # max articles per embedding + upsert cycle to avoid OOM
 
 
-def _ensure_collection(client: QdrantClient, collection: str) -> None:
-    """Drop-and-recreate the Qdrant collection so the schema is always current."""
+def _ensure_collection_schema(client: QdrantClient, collection: str, force_recreate: bool = False) -> None:
+    """Ensure the Qdrant collection exists with the correct hybrid schema.
+
+    By default uses incremental upsert mode: if the collection already exists
+    it is left untouched so the bot keeps serving requests during ETL runs.
+    Pass force_recreate=True only for schema migrations.
+    """
     existing = [c.name for c in client.get_collections().collections]
     if collection in existing:
-        print(f"[etl] Dropping existing collection '{collection}'…")
-        client.delete_collection(collection)
+        if force_recreate:
+            print(f"[etl] force_recreate=True — dropping existing collection '{collection}'…")
+            client.delete_collection(collection)
+        else:
+            print(f"[etl] Collection already exists, using upsert mode")
+            return
     print(f"[etl] Creating hybrid collection '{collection}' (dense + sparse)…")
     client.create_collection(
         collection_name=collection,
@@ -310,15 +319,15 @@ def transform(articles: list[dict]) -> list[PointStruct]:
 
 
 def load(points: list[PointStruct]) -> None:
-    """Recreate collection with hybrid schema and upsert all points."""
+    """Ensure collection schema and upsert all points (incremental by default)."""
     client = QdrantClient(
         host=os.getenv("QDRANT_HOST", "localhost"),
         port=int(os.getenv("QDRANT_PORT", 6333)),
     )
     collection = os.getenv("QDRANT_COLLECTION", "fact_checks")
-    _ensure_collection(client, collection)
+    _ensure_collection_schema(client, collection)
     client.upsert(collection_name=collection, points=points)
-    print(f"[etl] Upserted {len(points)} hybrid points into '{collection}'.")
+    print(f"[etl] Upserted {len(points)} points into '{collection}' (incremental mode).")
 
 
 def run() -> None:
@@ -329,13 +338,13 @@ def run() -> None:
     articles = extract()
     print(f"[etl] Extracted {len(articles)} articles (valid).")
 
-    # ── Setup Qdrant (collection recreated once, before any upserts) ────────
+    # ── Setup Qdrant (collection created only if absent; upsert mode otherwise) ─
     client = QdrantClient(
         host=os.getenv("QDRANT_HOST", "localhost"),
         port=int(os.getenv("QDRANT_PORT", 6333)),
     )
     collection = os.getenv("QDRANT_COLLECTION", "fact_checks")
-    _ensure_collection(client, collection)
+    _ensure_collection_schema(client, collection)
 
     # ── Load models once — kept alive across batches ────────────────────────
     print("[etl] Loading dense model (multilingual-e5-large, ONNX)…")
@@ -367,7 +376,7 @@ def run() -> None:
     del dense_model, sparse_model
     gc.collect()
 
-    print(f"[etl] Upserted {total_upserted} hybrid points into '{collection}'.")
+    print(f"[etl] Upserted {total_upserted} points into '{collection}' (incremental mode).")
 
     # ── Publisher summary (top 10) ────────────────────────────────────────
     from collections import Counter

@@ -84,7 +84,8 @@ async def hybrid_search(
                 fact_check_matches=len(local_hits),
                 source_url=best.get("url"),
                 verdict=best.get("verdict", "UNVERIFIED"),
-                summary=best.get("text", ""),  # article text passed to synthesize_verdict for LLM inference
+                retrieved_context=best.get("text", ""),
+                summary="",
             )
 
     # ── Level 2: parallel fallback (Google Fact Check + GNews) ─────────────────
@@ -112,7 +113,8 @@ async def hybrid_search(
             fact_check_matches=len(google_hits),
             source_url=best.get("url"),
             verdict=best.get("verdict", "UNVERIFIED"),
-            summary=best.get("text", ""),
+            retrieved_context=best.get("text", ""),
+            summary="",
         )
 
     if gnews_hits:
@@ -123,7 +125,8 @@ async def hybrid_search(
             fact_check_matches=len(gnews_hits),
             source_url=best.get("url"),
             verdict=best.get("verdict", "UNVERIFIED"),
-            summary=best.get("text", ""),
+            retrieved_context=best.get("text", ""),
+            summary="",
         )
 
     # L2 also empty — use best local hit only if relevance score is acceptable
@@ -137,7 +140,8 @@ async def hybrid_search(
                 fact_check_matches=len(local_hits),
                 source_url=best.get("url"),
                 verdict=best.get("verdict", "UNVERIFIED"),
-                summary=best.get("text", ""),
+                retrieved_context=best.get("text", ""),
+                summary="",
             )
         logger.info(
             "[rag] Discarding local hit score=%.3f < MIN_RELEVANCE=%.2f for query_id=%s",
@@ -159,7 +163,8 @@ async def synthesize_verdict(text: str, result: NLPResult) -> str:
     and ask the SLM to produce a 3-4 line verdict.
     Temperature is kept at 0 to minimise hallucination.
     """
-    retrieved_article = result.summary  # populated by hybrid_search
+    retrieved_article = result.retrieved_context
+    retrieved_article = retrieved_article[:1500]  # truncate to avoid context overflow in the SLM
 
     if not retrieved_article:
         return (

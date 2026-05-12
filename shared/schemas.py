@@ -39,11 +39,19 @@ class VisionResult(BaseModel):
 
 
 class NLPResult(BaseModel):
+    """NLP worker result.
+
+    retrieved_context: raw text of the source article retrieved from Qdrant/Google,
+                       used as input to the LLM.
+    summary:           final verdict synthesised by the LLM from retrieved_context.
+    """
+
     query_id: uuid.UUID
     extracted_entities: list[str]
     fact_check_matches: int
     source_url: str | None = None
     verdict: Literal["FAKE", "REAL", "UNVERIFIED"]
+    retrieved_context: str = ""         # source article text fed to the LLM
     summary: str                        # LLM-generated 3-line verdict
 
 

@@ -46,7 +46,12 @@ async def _get_channel() -> aio_pika.abc.AbstractChannel:
     )
     if _connection is None or _connection.is_closed:
         _connection = await aio_pika.connect_robust(url)
-    return await _connection.channel()
+    channel = await _connection.channel()
+    # Declare queues as durable so messages survive broker restarts and are not
+    # lost if the gateway starts before the workers.
+    await channel.declare_queue(os.getenv("RABBITMQ_QUEUE_IMAGES", "topic_images"), durable=True)
+    await channel.declare_queue(os.getenv("RABBITMQ_QUEUE_TEXTS", "topic_texts"), durable=True)
+    return channel
 
 
 async def route_message(payload: dict) -> None:
@@ -76,7 +81,7 @@ async def route_message(payload: dict) -> None:
         from shared.schemas import TextTask
         text: str = message.get("text", "")
         chat_id: int = message.get("chat", {}).get("id", 0)
-        min_length = int(os.getenv("NLP_MIN_TEXT_LENGTH", 15))
+        min_length = int(os.getenv("NLP_MIN_TEXT_LENGTH", 50))
         if len(text) < min_length:
             logger.info(
                 "route_message: text too short (%d chars, min=%d) — dropped. chat_id=%s",

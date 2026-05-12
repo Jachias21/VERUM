@@ -8,14 +8,18 @@ import os
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 
+_mongo_client: AsyncIOMotorClient | None = None
+
 
 def get_mongo_db() -> AsyncIOMotorDatabase:
-    uri = (
-        f"mongodb://{os.environ['MONGO_USER']}:{os.environ['MONGO_PASS']}"
-        f"@{os.environ['MONGO_HOST']}:{os.environ['MONGO_PORT']}"
-    )
-    client = AsyncIOMotorClient(uri)
-    return client[os.environ["MONGO_DB"]]
+    global _mongo_client
+    if _mongo_client is None:
+        uri = (
+            f"mongodb://{os.environ['MONGO_USER']}:{os.environ['MONGO_PASS']}"
+            f"@{os.environ['MONGO_HOST']}:{os.environ['MONGO_PORT']}"
+        )
+        _mongo_client = AsyncIOMotorClient(uri)
+    return _mongo_client[os.environ["MONGO_DB"]]
 
 
 def get_qdrant_client():
