@@ -4,6 +4,7 @@ runs the RAG fact-checking pipeline, and delivers the verdict via Telegram.
 """
 import asyncio
 import datetime
+import hashlib
 import logging
 import os
 import time
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 from shared.db import get_mongo_db
 from shared.schemas import TextTask, NLPResult, QueryLog
+from app.cache import get_cached_verdict, set_cached_verdict
 from app.ner import extract_entities, is_gibberish
 from app.rag import hybrid_search, synthesize_verdict, _extract_verdict_from_llm_output
 
@@ -90,34 +92,43 @@ async def process(message: aio_pika.abc.AbstractIncomingMessage) -> None:
                     )
                 return
 
-            entities = extract_entities(task.text)
-            result: NLPResult = await asyncio.wait_for(
-                hybrid_search(task.query_id, task.text, entities),
-                timeout=80.0,
-            )
-            result.summary = await synthesize_verdict(task.text, result)
-
-            # Override reply when the LLM had no relevant context to work with
-            _no_info_override = _is_no_info_response(result.summary)
-            if _no_info_override:
-                result.verdict = "UNVERIFIED"
-                result.summary = (
-                    "No encontré información verificada sobre esto.\n\n"
-                    "No tenemos esta noticia en nuestra base de datos ni en fuentes de "
-                    "fact-checking. Esto no significa que sea falsa — simplemente no hay registros.\n\n"
-                    "💡 Comprueba en: maldita.es · newtral.es · snopes.com"
+            text_hash = hashlib.sha256(task.text.strip().lower().encode()).hexdigest()
+            cached = await get_cached_verdict(text_hash)
+            cache_hit = cached is not None
+            if cache_hit:
+                result = cached
+                logger.info("[nlp] Cache HIT for query_id=%s", task.query_id)
+                elapsed_ms = int((time.monotonic() - start) * 1000)
+            else:
+                entities = extract_entities(task.text)
+                result: NLPResult = await asyncio.wait_for(
+                    hybrid_search(task.query_id, task.text, entities),
+                    timeout=80.0,
                 )
+                result.summary = await synthesize_verdict(task.text, result)
 
-            # Override verdict with LLM output when it follows the expected format
-            llm_verdict = _extract_verdict_from_llm_output(result.summary)
-            if llm_verdict is not None:
-                logger.info(
-                    "process: LLM overriding RAG verdict %r → %r for query_id=%s",
-                    result.verdict, llm_verdict, task.query_id,
-                )
-                result.verdict = llm_verdict
+                # Override reply when the LLM had no relevant context to work with
+                _no_info_override = _is_no_info_response(result.summary)
+                if _no_info_override:
+                    result.verdict = "UNVERIFIED"
+                    result.summary = (
+                        "No encontré información verificada sobre esto.\n\n"
+                        "No tenemos esta noticia en nuestra base de datos ni en fuentes de "
+                        "fact-checking. Esto no significa que sea falsa — simplemente no hay registros.\n\n"
+                        "💡 Comprueba en: maldita.es · newtral.es · snopes.com"
+                    )
 
-            elapsed_ms = int((time.monotonic() - start) * 1000)
+                # Override verdict with LLM output when it follows the expected format
+                llm_verdict = _extract_verdict_from_llm_output(result.summary)
+                if llm_verdict is not None:
+                    logger.info(
+                        "process: LLM overriding RAG verdict %r → %r for query_id=%s",
+                        result.verdict, llm_verdict, task.query_id,
+                    )
+                    result.verdict = llm_verdict
+
+                elapsed_ms = int((time.monotonic() - start) * 1000)
+                await set_cached_verdict(text_hash, result)
 
             # ── GAP 1: Log to MongoDB ─────────────────────────────────────────────
             db = get_mongo_db()
@@ -128,6 +139,7 @@ async def process(message: aio_pika.abc.AbstractIncomingMessage) -> None:
                 payload_type="text",
                 total_processing_time_ms=elapsed_ms,
                 final_verdict=result.verdict,
+                cache_hit=cache_hit,
                 extracted_entities=result.extracted_entities,
                 fact_check_matches=result.fact_check_matches,
                 source_url=result.source_url,
@@ -136,6 +148,7 @@ async def process(message: aio_pika.abc.AbstractIncomingMessage) -> None:
 
             # ── GAP 2: Send Telegram reply ────────────────────────────────────────
             if task.chat_id:
+                _no_info_override = not cache_hit and _is_no_info_response(result.summary)
                 if _no_info_override:
                     reply = "🟡 *No encontré información verificada sobre esto.*\n\n" + result.summary
                 else:
@@ -145,6 +158,8 @@ async def process(message: aio_pika.abc.AbstractIncomingMessage) -> None:
                         f"{result.summary}\n\n"
                         f"📎 Fuente: {result.source_url or 'Sin coincidencias en la base de datos.'}"
                     )
+                    if cache_hit:
+                        reply += "\n\n⚡ *(respuesta cacheada)*"
                 await _send_telegram_reply(task.chat_id, reply)
 
             print(f"[nlp] {task.query_id} → {result.verdict} ({elapsed_ms}ms)")

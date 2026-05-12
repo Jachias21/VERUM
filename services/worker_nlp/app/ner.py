@@ -1,23 +1,46 @@
 """
-Named Entity Recognition using SpaCy es_core_news_lg.
+Named Entity Recognition using SpaCy with dynamic language model selection.
 Extracts key concepts from viral messages before RAG retrieval.
 """
 from __future__ import annotations
 
 import logging
 import re
+from typing import Any
+
 import spacy
 
 logger = logging.getLogger("verum.ner")
 
-_nlp = None  # lazy-loaded singleton
+# Supported language → SpaCy model name
+_MODELS: dict[str, str] = {
+    "es": "es_core_news_lg",
+    "en": "en_core_web_sm",
+}
+
+# Lazy-loaded singletons, one per detected language
+_nlp_models: dict[str, Any] = {}
 
 
-def _get_nlp():
-    global _nlp
-    if _nlp is None:
-        _nlp = spacy.load("es_core_news_lg")
-    return _nlp
+def _detect_language(text: str) -> str:
+    """Return ISO 639-1 language code for *text*, defaulting to 'es' on failure."""
+    try:
+        from langdetect import detect, LangDetectException  # type: ignore[import]
+        try:
+            return detect(text)
+        except LangDetectException:
+            return "es"
+    except ImportError:
+        return "es"
+
+
+def _get_nlp(lang: str = "es") -> Any:
+    """Return (and lazily load) the SpaCy model for *lang*."""
+    model_name = _MODELS.get(lang, "es_core_news_lg")
+    if lang not in _nlp_models:
+        logger.debug("[ner] Loading SpaCy model %r for lang=%r", model_name, lang)
+        _nlp_models[lang] = spacy.load(model_name)
+    return _nlp_models[lang]
 
 
 def extract_entities(text: str) -> list[str]:
@@ -29,7 +52,9 @@ def extract_entities(text: str) -> list[str]:
     clean = re.sub(r"http\S+", "", text)
     clean = re.sub(r"[^\w\s]", " ", clean)
 
-    doc = _get_nlp()(clean)
+    lang = _detect_language(clean)
+    logger.debug("[ner] Detected language: %s", lang)
+    doc = _get_nlp(lang)(clean)
 
     entities: list[str] = []
 
@@ -63,7 +88,18 @@ def is_gibberish(text: str) -> bool:
     if not clean:
         return True
 
-    doc = _get_nlp()(clean)
+    # ── Fast-path checks (no SpaCy needed) ────────────────────────────────────
+    if len(clean) < 3:
+        logger.debug("[ner] Gibberish fast-path triggered for text=%.20r", text)
+        return True
+    alnum_ratio = sum(c.isalnum() for c in clean) / len(clean)
+    if alnum_ratio < 0.3:
+        logger.debug("[ner] Gibberish fast-path triggered for text=%.20r", text)
+        return True
+
+    lang = _detect_language(clean)
+    logger.debug("[ner] is_gibberish lang: %s", lang)
+    doc = _get_nlp(lang)(clean)
 
     if not doc.has_annotation("TAG"):
         return False  # model could not parse at all — let pipeline handle it

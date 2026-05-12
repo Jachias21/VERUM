@@ -10,9 +10,11 @@ import logging
 import os
 
 from fastapi import FastAPI, HTTPException, Header, Request
+from fastapi.responses import Response
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from telegram import Bot
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from app.router import route_message, publish_nlp_task
 
@@ -58,6 +60,11 @@ class TextRequest(BaseModel):
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/metrics")
+async def metrics():
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.post("/webhook")

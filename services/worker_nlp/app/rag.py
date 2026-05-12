@@ -18,6 +18,7 @@ import time
 import uuid
 
 import httpx
+from cachetools import TTLCache
 from langchain_ollama import OllamaLLM
 from langchain_core.prompts import PromptTemplate
 from qdrant_client import AsyncQdrantClient
@@ -26,6 +27,9 @@ from shared.schemas import NLPResult
 from models.nlp.embeddings import embed, sparse_embed
 
 logger = logging.getLogger("verum.rag")
+
+# In-memory cache for Google Fact Check API results (asyncio single-thread, no lock needed)
+_google_fc_cache: TTLCache = TTLCache(maxsize=256, ttl=300)
 
 
 async def hybrid_search(
@@ -46,7 +50,8 @@ async def hybrid_search(
     )
 
     # ── Early exit: no entities and text too short to search meaningfully ─────
-    if not entities and len(text) < 20:
+    _min_len = int(os.getenv("NLP_MIN_TEXT_LENGTH", 50))
+    if not entities and len(text) < _min_len:
         logger.warning("hybrid_search: early-exit — text too short and no entities for query_id=%s", query_id)
         return NLPResult(
             query_id=query_id,
@@ -203,7 +208,7 @@ async def synthesize_verdict(text: str, result: NLPResult) -> str:
     chain = prompt | llm
 
     MAX_RETRIES = 2
-    OLLAMA_TIMEOUT_SECONDS = 45
+    OLLAMA_TIMEOUT_SECONDS = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", 45))
 
     for attempt in range(MAX_RETRIES + 1):
         try:
@@ -245,11 +250,11 @@ def _extract_verdict_from_llm_output(text: str) -> str | None:
     Returns "FAKE", "REAL", or "UNVERIFIED", or None if nothing matches.
     Checks Spanish labels first (VEREDICTO:), then English (VERDICT:).
     """
-    if re.search(r"veredicto:\s*no[\s_]verificado", text, re.IGNORECASE):
+    if re.search(r"veredicto:\s*no[\s_-]verificado", text, re.IGNORECASE):
         return "UNVERIFIED"
-    if re.search(r"veredicto:\s*falso", text, re.IGNORECASE):
+    if re.search(r"veredicto:\s*falso\b", text, re.IGNORECASE):
         return "FAKE"
-    if re.search(r"veredicto:\s*verdadero", text, re.IGNORECASE):
+    if re.search(r"veredicto:\s*verdadero\b", text, re.IGNORECASE):
         return "REAL"
     if re.search(r"verdict:\s*unverified", text, re.IGNORECASE):
         return "UNVERIFIED"
@@ -288,21 +293,33 @@ async def _search_qdrant(entities: list[str]) -> list[dict]:
     qdrant_port = int(os.getenv("QDRANT_PORT", "6333"))
     collection = os.getenv("QDRANT_COLLECTION", "fact_checks")
 
-    try:
-        client = AsyncQdrantClient(host=qdrant_host, port=qdrant_port)
-        response = await client.query_points(
-            collection_name=collection,
-            prefetch=[
-                Prefetch(query=dense_vec, using="dense", limit=20),
-                Prefetch(query=sparse_vec, using="sparse", limit=20),
-            ],
-            query=FusionQuery(fusion=Fusion.RRF),
-            limit=5,
-            with_payload=True,
-        )
-        hits = response.points
-    except Exception as exc:  # noqa: BLE001
-        logger.error("[rag] Qdrant hybrid search failed: %s", exc)
+    _MAX_RETRIES = 2
+    last_exc: Exception | None = None
+    hits = []
+    for attempt in range(_MAX_RETRIES + 1):
+        if attempt > 0:
+            delay = 2 ** (attempt - 1)  # 1 s, 2 s
+            logger.warning("[rag] Qdrant retry attempt %d/%d (sleeping %ds)", attempt, _MAX_RETRIES, delay)
+            await asyncio.sleep(delay)
+        try:
+            client = AsyncQdrantClient(host=qdrant_host, port=qdrant_port)
+            response = await client.query_points(
+                collection_name=collection,
+                prefetch=[
+                    Prefetch(query=dense_vec, using="dense", limit=20),
+                    Prefetch(query=sparse_vec, using="sparse", limit=20),
+                ],
+                query=FusionQuery(fusion=Fusion.RRF),
+                limit=5,
+                with_payload=True,
+            )
+            hits = response.points
+            break  # success
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            logger.warning("[rag] Qdrant hybrid search attempt %d failed: %s", attempt + 1, exc)
+    else:
+        logger.error("[rag] Qdrant unreachable after %d retries: %s", _MAX_RETRIES, last_exc)
         return []
 
     results = []
@@ -344,7 +361,13 @@ async def _search_google_fact_check(query: str) -> list[dict]:
 
     First attempts with languageCode=es; if that returns 0 claims, retries
     without languageCode to capture Latin-American fact-checks.
+    Results are cached in memory for 5 minutes to avoid redundant API calls.
     """
+    cache_key = query.strip().lower()
+    if cache_key in _google_fc_cache:
+        logger.info("[rag] Google FC: cache hit for query=%.60r", query)
+        return _google_fc_cache[cache_key]
+
     api_key = os.getenv("GOOGLE_FACT_CHECK_API_KEY", "")
     if not api_key:
         logger.warning("[rag] Google FC API: key not configured — skipping")
@@ -363,6 +386,7 @@ async def _search_google_fact_check(query: str) -> list[dict]:
             if claims:
                 result = _parse_google_claims(claims)
                 logger.info("[rag] Google FC returned %d claims for query=%.60r", len(result), query)
+                _google_fc_cache[cache_key] = result
                 return result
             # Retry without languageCode for broader coverage
             resp2 = await client.get(url, params={"query": query, "key": api_key})
@@ -371,6 +395,7 @@ async def _search_google_fact_check(query: str) -> list[dict]:
                 return []
             result = _parse_google_claims(resp2.json().get("claims", []))
             logger.info("[rag] Google FC (retry, no lang) returned %d claims for query=%.60r", len(result), query)
+            _google_fc_cache[cache_key] = result
             return result
     except Exception as exc:
         logger.error("[rag] Google Fact Check API error: %s", exc)

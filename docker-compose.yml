@@ -126,7 +126,22 @@ services:
       - qdrant
     profiles:
       - etl   # docker compose --profile etl run etl
-
+  # etl_scheduler:
+  #   build:
+  #     context: .
+  #     dockerfile: services/etl/Dockerfile
+  #   container_name: verum_etl_scheduler
+  #   env_file: .env
+  #   environment:
+  #     PYTHONUNBUFFERED: "1"
+  #     ETL_SCHEDULE: ${ETL_SCHEDULE:-0 */12 * * *}
+  #   entrypoint: ["/bin/sh", "/app/cron/entrypoint.sh"]
+  #   depends_on:
+  #     qdrant:
+  #       condition: service_started
+  #   volumes:
+  #     - ./services/etl/cron:/app/cron:ro
+  #   restart: unless-stopped
 volumes:
   rabbitmq_data:
   mongodb_data:

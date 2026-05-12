@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 import aio_pika
 from telegram import Bot
 
+from app.metrics import texts_received, images_received, messages_rejected
+
 logger = logging.getLogger(__name__)
 
 
@@ -58,6 +60,7 @@ async def route_message(payload: dict) -> None:
     message = payload.get("message") or payload.get("channel_post", {})
     if not message:
         logger.warning("route_message: payload contains no 'message' or 'channel_post' key — skipping. payload=%s", payload)
+        messages_rejected.inc()
         return
 
     user_id = str(message.get("from", {}).get("id", "unknown"))
@@ -89,6 +92,7 @@ async def route_message(payload: dict) -> None:
                 "route_message: text too short (%d chars, min=%d) — dropped. chat_id=%s",
                 len(text), min_length, chat_id,
             )
+            messages_rejected.inc()
             if chat_id:
                 await _send_interim_message(
                     chat_id,
@@ -124,6 +128,7 @@ async def route_message(payload: dict) -> None:
             "route_message: unsupported message type (no 'text' or 'photo') — skipping. keys=%s",
             list(message.keys()),
         )
+        messages_rejected.inc()
         return  # Unsupported payload type (video, sticker, etc.)
 
     channel = await _get_channel()
@@ -131,6 +136,10 @@ async def route_message(payload: dict) -> None:
         aio_pika.Message(body=body.encode()),
         routing_key=queue,
     )
+    if queue == os.getenv("RABBITMQ_QUEUE_TEXTS", "topic_texts"):
+        texts_received.inc()
+    else:
+        images_received.inc()
     logger.info("route_message: message published to queue=%s", queue)
 
 

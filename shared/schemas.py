@@ -65,6 +65,7 @@ class QueryLog(BaseModel):
     payload_type: Literal["image", "text"]
     total_processing_time_ms: int
     final_verdict: Literal["FAKE", "REAL", "UNVERIFIED"]
+    cache_hit: bool = False
     # image-specific
     image_resolution: str | None = None
     ai_confidence_score: float | None = None

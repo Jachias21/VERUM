@@ -52,6 +52,14 @@ def test_extract_verdict_no_match():
     assert _extract_verdict_from_llm_output("No hay suficiente información disponible.") is None
 
 
+def test_extract_verdict_no_verified_before_verified():
+    from services.worker_nlp.app.rag import _extract_verdict_from_llm_output
+
+    assert _extract_verdict_from_llm_output(
+        "VEREDICTO: NO VERIFICADO por falta de fuentes verificables"
+    ) == "UNVERIFIED"
+
+
 # ── Test 10: hybrid_search with high-confidence Qdrant hit ───────────────────
 
 async def test_hybrid_search_qdrant_hit(mock_qdrant_hits):

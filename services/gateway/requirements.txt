@@ -6,3 +6,4 @@ httpx             # Telegram file downloads
 motor              # Async MongoDB (for query logging)
 python-dotenv
 python-telegram-bot  # Telegram Bot API (interim messages, command replies)
+prometheus-client
