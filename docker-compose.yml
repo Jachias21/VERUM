@@ -71,8 +71,6 @@ services:
     build:
       context: .
       dockerfile: services/worker_vision/Dockerfile
-    environment:
-      - PYTHONUNBUFFERED=1
     container_name: verum_worker_vision
     env_file: .env
     environment:
@@ -90,8 +88,6 @@ services:
     build:
       context: .
       dockerfile: services/worker_nlp/Dockerfile
-    environment:
-      - PYTHONUNBUFFERED=1
     container_name: verum_worker_nlp
     env_file: .env
     environment:
