@@ -82,8 +82,3 @@ heatmap_*.png                   # Grad-CAM generados en runtime
 
 VERUM_TFM.md
 CLAUDE.md
-
-
-
-# -- para el pc tema versiones --
-pyproject.toml
