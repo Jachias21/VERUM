@@ -68,6 +68,7 @@ async def test_route_message_long_text_published():
     with (
         patch("services.gateway.app.router._get_channel", new=AsyncMock(return_value=mock_channel)),
         patch("services.gateway.app.router._send_interim_message", new=AsyncMock()),
+        patch("services.gateway.app.router.check_rate_limit", new=AsyncMock(return_value=True)),
     ):
         await route_message(payload)
 
@@ -93,6 +94,7 @@ async def test_route_message_photo_published():
     with (
         patch("services.gateway.app.router._get_channel", new=AsyncMock(return_value=mock_channel)),
         patch("services.gateway.app.router._send_interim_message", new=AsyncMock()),
+        patch("services.gateway.app.router.check_rate_limit", new=AsyncMock(return_value=True)),
     ):
         await route_message(payload)
 
@@ -118,3 +120,29 @@ async def test_route_message_unsupported_type_no_exception():
         await route_message(payload)  # must not raise
 
     mock_channel.default_exchange.publish.assert_not_called()
+
+
+# ── Test 18: rate limit blocks the 11th request ────────────────────────────────
+
+async def test_rate_limit_blocks_after_max():
+    from services.gateway.app.router import route_message
+
+    long_text = "El Gobierno de España anuncia que el nuevo virus detectado en Madrid no representa ningún peligro real."
+    payload = _telegram_payload(text=long_text, chat_id=123)
+
+    mock_channel = _make_mock_channel()
+    mock_interim = AsyncMock()
+
+    with (
+        patch("services.gateway.app.router._get_channel", new=AsyncMock(return_value=mock_channel)),
+        patch("services.gateway.app.router._send_interim_message", new=mock_interim),
+        patch("services.gateway.app.router.check_rate_limit", new=AsyncMock(return_value=False)),
+    ):
+        await route_message(payload)
+
+    # Rate-limited: nothing published to the queue
+    mock_channel.default_exchange.publish.assert_not_called()
+    # User receives the courtesy rate-limit message
+    mock_interim.assert_called_once()
+    call_text = mock_interim.call_args[0][1]
+    assert "⏳" in call_text or "demasiados" in call_text

@@ -74,3 +74,4 @@ class QueryLog(BaseModel):
     extracted_entities: list[str] | None = None
     fact_check_matches: int | None = None
     source_url: str | None = None
+    feedback: str | None = None         # "correct" | "incorrect" — set via /feedback command

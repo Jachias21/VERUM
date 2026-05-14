@@ -13,6 +13,7 @@ import aio_pika
 from telegram import Bot
 
 from app.metrics import texts_received, images_received, messages_rejected
+from app.rate_limiter import check_rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +131,20 @@ async def route_message(payload: dict) -> None:
         )
         messages_rejected.inc()
         return  # Unsupported payload type (video, sticker, etc.)
+
+    # Rate limit check — applied after payload validation, before publishing.
+    if not await check_rate_limit(user_hash):
+        logger.warning(
+            "route_message: rate limit exceeded — user_hash=%.12s… chat_id=%s",
+            user_hash, chat_id,
+        )
+        messages_rejected.inc()
+        if chat_id:
+            await _send_interim_message(
+                chat_id,
+                "⏳ Has enviado demasiados mensajes. Por favor, espera 1 minuto antes de volver a consultar.",
+            )
+        return
 
     channel = await _get_channel()
     await channel.default_exchange.publish(

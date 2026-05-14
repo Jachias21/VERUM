@@ -383,6 +383,15 @@ python evaluate.py --checkpoint weights/verum_cnn.pt --export-onnx
 
 ### 6. Registrar el webhook de Telegram
 
+Si has configurado `WEBHOOK_BASE_URL` en tu `.env`, el webhook se registra automáticamente
+al arrancar el gateway (`docker compose up -d gateway`). Verás en los logs:
+
+```
+[gateway] Webhook registrado en https://tu-dominio.com/webhook
+```
+
+Si prefieres registrarlo manualmente (o no usas `WEBHOOK_BASE_URL`):
+
 ```bash
 curl "https://api.telegram.org/bot<TOKEN>/setWebhook" \
   -d "url=https://tu-dominio.com/webhook" \
