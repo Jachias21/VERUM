@@ -8,6 +8,7 @@ Run with: pytest tests/test_integration/ -v
 """
 from __future__ import annotations
 
+import asyncio
 import datetime
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -58,6 +59,15 @@ def _make_mongo_mock() -> MagicMock:
     """Return a motor-compatible database mock with an async insert_one."""
     collection = MagicMock()
     collection.insert_one = AsyncMock()
+    db = MagicMock()
+    db.__getitem__ = MagicMock(return_value=collection)
+    return db
+
+
+def _make_mongo_mock_failing() -> MagicMock:
+    """Return a MongoDB mock where insert_one raises to simulate a connectivity failure."""
+    collection = MagicMock()
+    collection.insert_one = AsyncMock(side_effect=Exception("MongoDB unreachable"))
     db = MagicMock()
     db.__getitem__ = MagicMock(return_value=collection)
     return db
@@ -214,3 +224,181 @@ async def test_full_pipeline_cache_hit():
     mock_send.assert_called_once()
     text = _sent_text(mock_send)
     assert "⚡" in text
+
+
+# ── Test 5: Ollama timeout → worker catches it, sends ⚠️, no crash ──────────
+
+@pytest.mark.asyncio
+async def test_pipeline_ollama_timeout_sends_error_reply():
+    """asyncio.TimeoutError raised by synthesize_verdict must be caught;
+    the user receives ⚠️ and the worker does not propagate the exception."""
+    from services.worker_nlp.app.worker import process
+
+    task = _make_task()
+    message = FakeMessage(task)
+
+    mock_extract = MagicMock(return_value=["Gobierno", "Madrid"])
+    rag_result = NLPResult(
+        query_id=task.query_id,
+        extracted_entities=["Gobierno", "Madrid"],
+        fact_check_matches=0,
+        source_url=None,
+        verdict="UNVERIFIED",
+        retrieved_context="",
+        summary="",
+    )
+
+    with (
+        patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "fake_token"}),
+        patch("services.worker_nlp.app.worker.is_gibberish", return_value=False),
+        patch("services.worker_nlp.app.worker.get_cached_verdict", new=AsyncMock(return_value=None)),
+        patch("services.worker_nlp.app.worker.extract_entities", new=mock_extract),
+        patch(
+            "services.worker_nlp.app.worker.hybrid_search",
+            new=AsyncMock(return_value=rag_result),
+        ),
+        patch(
+            "services.worker_nlp.app.worker.synthesize_verdict",
+            new=AsyncMock(side_effect=asyncio.TimeoutError()),
+        ),
+        patch("services.worker_nlp.app.worker.Bot") as MockBot,
+    ):
+        mock_send = AsyncMock()
+        MockBot.return_value.send_message = mock_send
+        await process(message)  # must not raise
+
+    mock_extract.assert_called_once()
+    mock_send.assert_called_once()
+    text = _sent_text(mock_send)
+    assert "⚠️" in text
+
+
+# ── Test 6: Malformed LLM output → RAG verdict preserved ─────────────────────
+
+@pytest.mark.asyncio
+async def test_pipeline_malformed_llm_keeps_rag_verdict():
+    """LLM output without a VEREDICTO: tag must not override the RAG verdict."""
+    from services.worker_nlp.app.worker import process
+
+    task = _make_task()
+    message = FakeMessage(task)
+
+    rag_result = NLPResult(
+        query_id=task.query_id,
+        extracted_entities=["Gobierno", "Madrid"],
+        fact_check_matches=1,
+        source_url="https://maldita.es/test",
+        verdict="FAKE",
+        retrieved_context="Context from the knowledge base.",
+        summary="",
+    )
+
+    with (
+        patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "fake_token"}),
+        patch("services.worker_nlp.app.worker.is_gibberish", return_value=False),
+        patch("services.worker_nlp.app.worker.get_cached_verdict", new=AsyncMock(return_value=None)),
+        patch("services.worker_nlp.app.worker.extract_entities", return_value=["Gobierno", "Madrid"]),
+        patch(
+            "services.worker_nlp.app.worker.hybrid_search",
+            new=AsyncMock(return_value=rag_result),
+        ),
+        patch(
+            "services.worker_nlp.app.worker.synthesize_verdict",
+            # Free-form text with no VEREDICTO: pattern → _extract_verdict_from_llm_output returns None
+            new=AsyncMock(return_value="No tengo suficiente contexto para evaluar esta afirmación de forma precisa."),
+        ),
+        patch("services.worker_nlp.app.worker.set_cached_verdict", new=AsyncMock()),
+        patch("services.worker_nlp.app.worker.get_mongo_db", return_value=_make_mongo_mock()),
+        patch("services.worker_nlp.app.worker.Bot") as MockBot,
+    ):
+        mock_send = AsyncMock()
+        MockBot.return_value.send_message = mock_send
+        await process(message)
+
+    mock_send.assert_called_once()
+    text = _sent_text(mock_send)
+    # RAG verdict (FAKE) must survive: llm_verdict was None, no override happened
+    assert "FAKE" in text
+    assert "🔴" in text
+
+
+# ── Test 7: MongoDB failure → Telegram reply still delivered ─────────────────
+
+@pytest.mark.asyncio
+async def test_pipeline_mongodb_failure_still_replies_telegram():
+    """An insert_one exception must be swallowed so the verdict reply still reaches the user."""
+    from services.worker_nlp.app.worker import process
+
+    task = _make_task()
+    message = FakeMessage(task)
+
+    qdrant_hit = [
+        {
+            "score": 0.85,
+            "verdict": "FAKE",
+            "text": "Es falso.",
+            "url": "https://maldita.es/test",
+        }
+    ]
+
+    with (
+        patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "fake_token"}),
+        patch("services.worker_nlp.app.worker.is_gibberish", return_value=False),
+        patch("services.worker_nlp.app.worker.get_cached_verdict", new=AsyncMock(return_value=None)),
+        patch("services.worker_nlp.app.worker.extract_entities", return_value=["Gobierno", "virus"]),
+        patch("services.worker_nlp.app.rag._search_qdrant", new=AsyncMock(return_value=qdrant_hit)),
+        patch(
+            "services.worker_nlp.app.worker.synthesize_verdict",
+            new=AsyncMock(return_value="VEREDICTO: FALSO — confirmado por las fuentes."),
+        ),
+        patch("services.worker_nlp.app.worker.set_cached_verdict", new=AsyncMock()),
+        patch("services.worker_nlp.app.worker.get_mongo_db", return_value=_make_mongo_mock_failing()),
+        patch("services.worker_nlp.app.worker.Bot") as MockBot,
+    ):
+        mock_send = AsyncMock()
+        MockBot.return_value.send_message = mock_send
+        await process(message)  # must not raise despite MongoDB failure
+
+    mock_send.assert_called_once()
+    text = _sent_text(mock_send)
+    assert "🔴" in text
+    assert "FAKE" in text
+
+
+# ── Test 8: URLs + emojis only → graceful UNVERIFIED degradation ──────────────
+
+@pytest.mark.asyncio
+async def test_pipeline_urls_emojis_only_degrades_to_unverified():
+    """Text made up solely of URLs and emojis yields no entities;
+    the pipeline must degrade gracefully and return UNVERIFIED with a useful message."""
+    from services.worker_nlp.app.worker import process
+
+    task = _make_task(text="\U0001f389\U0001f389 https://fake.com https://otro.com \U0001f4a5\U0001f4a5\U0001f4a5 !!!")
+    message = FakeMessage(task)
+
+    with (
+        patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "fake_token"}),
+        patch("services.worker_nlp.app.worker.is_gibberish", return_value=False),
+        patch("services.worker_nlp.app.worker.get_cached_verdict", new=AsyncMock(return_value=None)),
+        # NER strips URLs and emojis → no named entities remain
+        patch("services.worker_nlp.app.worker.extract_entities", return_value=[]),
+        # Defensive mocks in case hybrid_search doesn't early-exit
+        patch("services.worker_nlp.app.rag._search_qdrant", new=AsyncMock(return_value=[])),
+        patch("services.worker_nlp.app.rag._search_google_fact_check", new=AsyncMock(return_value=[])),
+        patch("services.worker_nlp.app.rag._search_gnews", new=AsyncMock(return_value=[])),
+        patch(
+            "services.worker_nlp.app.worker.synthesize_verdict",
+            new=AsyncMock(return_value="No tengo información sobre esta afirmación."),
+        ),
+        patch("services.worker_nlp.app.worker.set_cached_verdict", new=AsyncMock()),
+        patch("services.worker_nlp.app.worker.get_mongo_db", return_value=_make_mongo_mock()),
+        patch("services.worker_nlp.app.worker.Bot") as MockBot,
+    ):
+        mock_send = AsyncMock()
+        MockBot.return_value.send_message = mock_send
+        await process(message)
+
+    mock_send.assert_called_once()
+    text = _sent_text(mock_send)
+    assert "🟡" in text
+    assert "UNVERIFIED" in text or "No encontré" in text

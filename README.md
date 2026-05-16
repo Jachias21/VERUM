@@ -177,15 +177,18 @@ app/
 
 ### `services/worker_nlp/` — Worker de NLP
 
-**Tecnología:** SpaCy + LangChain + Qdrant + Ollama (Llama 3.2 / Qwen 2.5)
+**Tecnología:** SpaCy + LangChain + Qdrant + Ollama (Llama 3.2 / Qwen 2.5) + Prometheus  
+**Puerto de métricas:** `9101` (`/metrics`)
 
-Consume mensajes de `topic_texts`. Para cada texto viral extrae entidades, busca desmentidos y genera un veredicto explicado.
+Consume mensajes de `topic_texts`. Para cada texto viral extrae entidades, busca desmentidos y genera un veredicto explicado. Expone métricas Prometheus scrapeables en `http://localhost:9101/metrics`, incluyendo el histograma `verum_nlp_processing_seconds` (latencia extremo a extremo por mensaje).
 
 ```
 app/
-├── worker.py   # Bucle RabbitMQ: consume, orquesta, loguea y responde
-├── ner.py      # Limpieza de texto + extracción de entidades (SpaCy es_core_news_lg)
-└── rag.py      # Pipeline RAG híbrido en dos niveles + síntesis LLM
+├── worker.py    # Bucle RabbitMQ: consume, orquesta, loguea y responde
+├── ner.py       # Limpieza de texto + extracción de entidades (SpaCy es_core_news_lg)
+├── rag.py       # Pipeline RAG híbrido en dos niveles + síntesis LLM
+├── cache.py     # Caché de veredictos en MongoDB (evita re-procesar duplicados)
+└── metrics.py   # Histograma Prometheus: verum_nlp_processing_seconds
 ```
 
 **Pipeline de `rag.py` (dos niveles):**
@@ -198,10 +201,11 @@ Nivel 1 — Local (baja latencia, sin coste):
   → Si score ≥ NLP_CONFIDENCE_THRESHOLD: usar resultado local
 
 Nivel 2 — Fallback online (bulo de "Día Cero"):
-  Google Fact Check Tools API
-  └── Busca por las entidades extraídas
+  ├── Google Fact Check Tools API
+  └── GNews API (en paralelo)
+  Ambas buscan por las entidades extraídas; resultados fusionados con RRF
 
-Fusión: RRF (Reciprocal Rank Fusion) de ambas listas
+Fusión: RRF (Reciprocal Rank Fusion) de todas las listas
 Síntesis: prompt al LLM local vía Ollama → veredicto en 3 líneas
 ```
 
@@ -209,8 +213,8 @@ Síntesis: prompt al LLM local vía Ollama → veredicto en 3 líneas
 
 ### `services/etl/` — Pipeline ETL
 
-**Tecnología:** feedparser + sentence-transformers + qdrant-client
-**Ejecución:** on-demand o cron (`docker compose --profile etl run etl`)
+**Tecnología:** feedparser + sentence-transformers + qdrant-client  
+**Ejecución:** automática (`etl_scheduler`) o manual (`--profile etl`)
 
 Mantiene actualizada la base de conocimiento local (Qdrant) con los últimos artículos de fact-checking.
 
@@ -219,7 +223,11 @@ app/
 └── pipeline.py   # Extract (RSS feeds) → Transform (embeddings) → Load (Qdrant upsert)
 ```
 
-**Fuentes configuradas por defecto:** Maldita.es · Newtral.es · Snopes.com
+Dos modos de ejecución coexisten:
+- **`etl_scheduler`** — Servicio que arranca automáticamente con `docker compose up -d`. Ejecuta el pipeline según la expresión cron configurada en `ETL_SCHEDULE` (por defecto `0 */12 * * *`, cada 12 horas). El primer ciclo se lanza inmediatamente al arrancar el contenedor.
+- **`etl` (manual)** — Para lanzamientos puntuales: `docker compose --profile etl run etl`.
+
+**Fuentes configuradas por defecto:** Maldita.es · Newtral.es · Snopes.com  
 Se pueden añadir más URLs en `RSS_FEEDS` dentro de `pipeline.py`.
 
 ---
@@ -233,7 +241,8 @@ Se conecta a MongoDB en tiempo real y muestra:
 - Total de consultas, FakeNews detectadas, latencia media, usuarios únicos.
 - Distribución de veredictos (pie chart).
 - Evolución temporal de consultas (line chart).
-- Top entidades extraídas de textos (bar chart).
+- Nube de palabras (word cloud) con las entidades más consultadas de la última semana, en paleta teal/cyan (usa todos los datos disponibles si hay menos de 5 consultas recientes).
+- Top 20 entidades extraídas (bar chart complementario).
 
 ---
 
@@ -367,6 +376,8 @@ docker exec -it verum_ollama ollama pull llama3.2:3b
 
 ### 4. Poblar la base de conocimiento
 
+El servicio `etl_scheduler` arranca automáticamente con `docker compose up -d` y ejecuta el pipeline en el horario configurado en `ETL_SCHEDULE`. Para una carga inicial inmediata:
+
 ```bash
 docker compose --profile etl run etl
 ```
@@ -406,6 +417,15 @@ curl "https://api.telegram.org/bot<TOKEN>/setWebhook" \
 docker compose logs -f worker_vision
 docker compose logs -f worker_nlp
 docker compose logs -f gateway
+docker compose logs -f etl_scheduler
+```
+
+### Métricas Prometheus
+
+El `worker_nlp` expone métricas en `http://localhost:9101/metrics`. Para verificar:
+
+```bash
+curl http://localhost:9101/metrics | grep verum_nlp
 ```
 
 ---

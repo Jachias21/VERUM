@@ -149,7 +149,13 @@ async def process(message: aio_pika.abc.AbstractIncomingMessage) -> None:
                 fact_check_matches=result.fact_check_matches,
                 source_url=result.source_url,
             )
-            await db["queries"].insert_one(log.model_dump())
+            try:
+                await db["queries"].insert_one(log.model_dump())
+            except Exception as mongo_err:
+                logger.error(
+                    "[nlp worker] MongoDB insert failed for query_id=%s: %s",
+                    task.query_id, mongo_err,
+                )
 
             # ── GAP 2: Send Telegram reply ────────────────────────────────────────
             if task.chat_id:

@@ -162,3 +162,142 @@ async def test_synthesize_verdict_truncates_context():
     assert len(captured_kwargs["retrieved_article"]) <= 1500, (
         f"retrieved_article passed to LLM must be <= 1500 chars, got {len(captured_kwargs['retrieved_article'])}"
     )
+
+
+# ── Tests 14-18: _search_gnews and L2 parallel fallback ──────────────────────
+
+async def test_search_gnews_returns_articles():
+    """_search_gnews parses GNews JSON response and returns list with required fields."""
+    articles_payload = {
+        "articles": [
+            {
+                "title": "El bulo del 5G es falso",
+                "description": "Expertos desmienten el bulo sobre el 5G.",
+                "url": "https://gnews.example.com/article/1",
+            },
+            {
+                "title": "Vacunas: sin evidencia de daño",
+                "description": "No hay evidencia científica de efectos negativos.",
+                "url": "https://gnews.example.com/article/2",
+            },
+        ]
+    }
+
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status.return_value = None
+    mock_resp.json.return_value = articles_payload
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.get = AsyncMock(return_value=mock_resp)
+
+    with (
+        patch("services.worker_nlp.app.rag.httpx.AsyncClient", return_value=mock_client),
+        patch.dict("os.environ", {"GNEWS_API_KEY": "test_gnews_key"}),
+    ):
+        from services.worker_nlp.app.rag import _search_gnews
+
+        results = await _search_gnews("bulo Madrid")
+
+    assert len(results) == 2
+    for r in results:
+        assert "score" in r
+        assert "verdict" in r
+        assert "url" in r
+        assert "text" in r
+    assert results[0]["url"] == "https://gnews.example.com/article/1"
+    assert results[1]["url"] == "https://gnews.example.com/article/2"
+
+
+async def test_search_gnews_no_api_key_returns_empty():
+    """_search_gnews returns [] immediately when GNEWS_API_KEY is not set."""
+    with patch.dict("os.environ", {"GNEWS_API_KEY": ""}):
+        from services.worker_nlp.app.rag import _search_gnews
+
+        results = await _search_gnews("bulo Madrid")
+
+    assert results == []
+
+
+async def test_search_gnews_request_failure_returns_empty():
+    """_search_gnews returns [] and does not propagate exceptions on request failure."""
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.get = AsyncMock(side_effect=Exception("Connection timeout"))
+
+    with (
+        patch("services.worker_nlp.app.rag.httpx.AsyncClient", return_value=mock_client),
+        patch.dict("os.environ", {"GNEWS_API_KEY": "test_gnews_key"}),
+    ):
+        from services.worker_nlp.app.rag import _search_gnews
+
+        results = await _search_gnews("bulo Madrid")
+
+    assert results == []
+
+
+async def test_hybrid_search_uses_gnews_when_google_fc_empty():
+    """hybrid_search falls back to GNews when L1 score is low and Google FC returns nothing."""
+    low_score_hits = [
+        {"score": 0.30, "url": "https://qdrant.example.com", "verdict": "UNVERIFIED", "text": ""}
+    ]
+    gnews_hit = [
+        {
+            "score": 0.7,
+            "verdict": "FAKE",
+            "url": "https://gnews.example.com/article/gnews1",
+            "text": "Este bulo ha sido desmentido por múltiples fuentes.",
+        }
+    ]
+
+    with (
+        patch("services.worker_nlp.app.rag._search_qdrant", new=AsyncMock(return_value=low_score_hits)),
+        patch("services.worker_nlp.app.rag._search_google_fact_check", new=AsyncMock(return_value=[])),
+        patch("services.worker_nlp.app.rag._search_gnews", new=AsyncMock(return_value=gnews_hit)),
+    ):
+        from services.worker_nlp.app.rag import hybrid_search
+
+        result = await hybrid_search(uuid.uuid4(), "Noticia de prueba sobre un bulo", ["Madrid", "virus"])
+
+    assert result.verdict == "FAKE"
+    assert result.source_url == "https://gnews.example.com/article/gnews1"
+    assert result.retrieved_context == "Este bulo ha sido desmentido por múltiples fuentes."
+    assert result.fact_check_matches == 1
+
+
+async def test_hybrid_search_prioritizes_google_fc_over_gnews():
+    """hybrid_search uses Google FC result, not GNews, when both L2 sources return hits."""
+    low_score_hits = [
+        {"score": 0.30, "url": "https://qdrant.example.com", "verdict": "UNVERIFIED", "text": ""}
+    ]
+    google_hit = [
+        {
+            "score": 1.0,
+            "verdict": "REAL",
+            "url": "https://factcheck.google.com/claim/99",
+            "text": "La afirmación es verdadera según múltiples fuentes verificadas.",
+        }
+    ]
+    gnews_hit = [
+        {
+            "score": 0.7,
+            "verdict": "FAKE",
+            "url": "https://gnews.example.com/article/99",
+            "text": "Artículo de GNews con veredicto diferente.",
+        }
+    ]
+
+    with (
+        patch("services.worker_nlp.app.rag._search_qdrant", new=AsyncMock(return_value=low_score_hits)),
+        patch("services.worker_nlp.app.rag._search_google_fact_check", new=AsyncMock(return_value=google_hit)),
+        patch("services.worker_nlp.app.rag._search_gnews", new=AsyncMock(return_value=gnews_hit)),
+    ):
+        from services.worker_nlp.app.rag import hybrid_search
+
+        result = await hybrid_search(uuid.uuid4(), "Noticia de prueba", ["Madrid"])
+
+    assert result.verdict == "REAL"
+    assert result.source_url == "https://factcheck.google.com/claim/99"
+    assert result.retrieved_context == "La afirmación es verdadera según múltiples fuentes verificadas."
