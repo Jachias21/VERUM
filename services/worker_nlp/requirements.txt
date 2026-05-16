@@ -26,3 +26,6 @@ cachetools
 
 # Telegram bot
 python-telegram-bot
+
+# Observability
+prometheus-client

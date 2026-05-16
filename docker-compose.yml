@@ -89,6 +89,8 @@ services:
       context: .
       dockerfile: services/worker_nlp/Dockerfile
     container_name: verum_worker_nlp
+    ports:
+      - "9101:9101"   # Prometheus metrics → http://localhost:9101/metrics
     env_file: .env
     environment:
       PYTHONUNBUFFERED: "1"
@@ -126,22 +128,28 @@ services:
       - qdrant
     profiles:
       - etl   # docker compose --profile etl run etl
-  # etl_scheduler:
-  #   build:
-  #     context: .
-  #     dockerfile: services/etl/Dockerfile
-  #   container_name: verum_etl_scheduler
-  #   env_file: .env
-  #   environment:
-  #     PYTHONUNBUFFERED: "1"
-  #     ETL_SCHEDULE: ${ETL_SCHEDULE:-0 */12 * * *}
-  #   entrypoint: ["/bin/sh", "/app/cron/entrypoint.sh"]
-  #   depends_on:
-  #     qdrant:
-  #       condition: service_started
-  #   volumes:
-  #     - ./services/etl/cron:/app/cron:ro
-  #   restart: unless-stopped
+  # etl_scheduler:  uncommented below — runs ETL on a cron schedule automatically
+  etl_scheduler:
+    build:
+      context: .
+      dockerfile: services/etl/Dockerfile
+    container_name: verum_etl_scheduler
+    env_file: .env
+    environment:
+      PYTHONUNBUFFERED: "1"
+      ETL_SCHEDULE: ${ETL_SCHEDULE:-0 */12 * * *}
+    entrypoint: ["/bin/sh", "/app/cron/entrypoint.sh"]
+    depends_on:
+      qdrant:
+        condition: service_started
+    volumes:
+      - ./services/etl/cron:/app/cron:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep cron > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
 volumes:
   rabbitmq_data:
   mongodb_data:

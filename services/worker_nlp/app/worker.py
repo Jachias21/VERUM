@@ -11,6 +11,7 @@ import time
 
 import aio_pika
 from dotenv import load_dotenv
+from prometheus_client import start_http_server
 from telegram import Bot
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 from shared.db import get_mongo_db
 from shared.schemas import TextTask, NLPResult, QueryLog
 from app.cache import get_cached_verdict, set_cached_verdict
+from app.metrics import nlp_processing_seconds
 from app.ner import extract_entities, is_gibberish
 from app.rag import hybrid_search, synthesize_verdict, _extract_verdict_from_llm_output
 
@@ -130,6 +132,9 @@ async def process(message: aio_pika.abc.AbstractIncomingMessage) -> None:
                 elapsed_ms = int((time.monotonic() - start) * 1000)
                 await set_cached_verdict(text_hash, result)
 
+            # ── Prometheus: observe end-to-end NLP latency ─────────────────────
+            nlp_processing_seconds.observe(elapsed_ms / 1000)
+
             # ── GAP 1: Log to MongoDB ─────────────────────────────────────────────
             db = get_mongo_db()
             log = QueryLog(
@@ -198,6 +203,9 @@ async def main() -> None:
         f"amqp://{os.environ['RABBITMQ_USER']}:{os.environ['RABBITMQ_PASS']}"
         f"@{os.environ['RABBITMQ_HOST']}:{os.environ['RABBITMQ_PORT']}/"
     )
+    metrics_port = int(os.getenv("NLP_METRICS_PORT", "9101"))
+    start_http_server(metrics_port)
+    logger.info("[nlp worker] Prometheus metrics available on :%d/metrics", metrics_port)
     while True:
         try:
             connection = await aio_pika.connect_robust(url)
