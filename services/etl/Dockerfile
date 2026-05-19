@@ -10,5 +10,8 @@ COPY services/etl/cron/ ./cron/
 RUN apt-get update && apt-get install -y --no-install-recommends cron \
     && rm -rf /var/lib/apt/lists/*
 
+# Fix Windows CRLF → LF (Git on Windows may convert line endings)
+RUN sed -i 's/\r$//' /app/cron/entrypoint.sh && chmod +x /app/cron/entrypoint.sh
+
 CMD ["python", "-m", "app.pipeline"]
 

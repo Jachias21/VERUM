@@ -394,22 +394,35 @@ python evaluate.py --checkpoint weights/verum_cnn.pt --export-onnx
 
 ### 6. Registrar el webhook de Telegram
 
-Si has configurado `WEBHOOK_BASE_URL` en tu `.env`, el webhook se registra automáticamente
-al arrancar el gateway (`docker compose up -d gateway`). Verás en los logs:
-
-```
-[gateway] Webhook registrado en https://tu-dominio.com/webhook
-```
-
-Si prefieres registrarlo manualmente (o no usas `WEBHOOK_BASE_URL`):
+Para desarrollo local con ngrok el proceso es completamente automático:
 
 ```bash
-curl "https://api.telegram.org/bot<TOKEN>/setWebhook" \
-  -d "url=https://tu-dominio.com/webhook" \
-  -d "secret_token=<TELEGRAM_WEBHOOK_SECRET>"
+# Terminal 1: inicia ngrok
+ngrok http 8000
+
+# Terminal 2: registra el webhook (detecta la URL de ngrok automáticamente)
+make webhook
 ```
 
-> Para desarrollo local usa Cloudflare Tunnel: `cloudflared tunnel --url http://localhost:8000`
+El comando `make webhook`:
+1. Lee la URL pública activa de ngrok (via su API local en :4040)
+2. Registra el webhook en Telegram con tu `TELEGRAM_BOT_TOKEN`
+3. Actualiza `WEBHOOK_BASE_URL` en el `.env`
+4. Reinicia el gateway para aplicar cambios
+
+Para ver el estado del webhook:
+```bash
+make webhook-info
+```
+
+Para eliminarlo:
+```bash
+make webhook-delete
+```
+
+Si despliegas en producción con dominio fijo (sin ngrok), edita `WEBHOOK_BASE_URL` en
+el `.env` manualmente y reinicia el gateway. El lifespan handler en `main.py` se
+encarga del registro automático al arrancar.
 
 ### Ver logs en tiempo real
 

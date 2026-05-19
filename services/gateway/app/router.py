@@ -106,7 +106,7 @@ async def route_message(payload: dict) -> None:
             asyncio.create_task(
                 _send_interim_message(
                     chat_id,
-                    "🔍 Analizando tu mensaje... Esto puede tardar hasta 15 segundos.",
+                    "🔍 Analizando tu mensaje... Esto puede tardar hasta 1 minuto.",
                 )
             )
 

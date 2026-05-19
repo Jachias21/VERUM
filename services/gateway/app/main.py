@@ -76,7 +76,7 @@ _HELP_TEXT = (
     "ℹ️ *Cómo usar VERUM*\n\n"
     "• Envíame cualquier texto viral o cadena de WhatsApp\n"
     "• Analizaré las entidades clave y buscaré desmentidos\n"
-    "• Recibirás un veredicto con fuente en menos de 15s\n"
+    "• Recibirás un veredicto con fuente en menos de 1min\n"
     "• Usa /feedback correcto o /feedback incorrecto después de un análisis para ayudarnos a mejorar\n\n"
     "⚠️ Textos muy cortos (menos de 50 caracteres) se ignoran."
 )
