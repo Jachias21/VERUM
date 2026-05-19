@@ -228,5 +228,61 @@ async def main() -> None:
             await asyncio.sleep(5)
 
 
+async def _run_smoke_test() -> None:
+    """Push one synthetic TextTask through process() without starting the metrics server.
+
+    Designed to be invoked via ``python -m app.worker --test`` inside a running
+    container so that ``make nlp-test`` can validate the pipeline without
+    conflicting with the already-bound Prometheus port.
+    """
+    import datetime
+    import uuid
+
+    class _FakeMsg:
+        """Minimal aio_pika message stub — mirrors FakeMessage in the test suite."""
+
+        def __init__(self, task: TextTask) -> None:
+            self.body = task.model_dump_json().encode()
+
+        def process(self):  # noqa: ANN201
+            class _Ctx:
+                async def __aenter__(self_) -> None:  # noqa: N805
+                    return None
+
+                async def __aexit__(self_, *_) -> None:  # noqa: N805
+                    return None
+
+            return _Ctx()
+
+    task = TextTask(
+        query_id=uuid.uuid4(),
+        user_hash="a" * 64,
+        chat_id=0,  # 0 is falsy → process() skips Telegram reply
+        text=(
+            "El Gobierno de España ha confirmado que el nuevo virus detectado "
+            "en Madrid no representa ningún peligro real para la población "
+            "según fuentes oficiales del Ministerio de Sanidad."
+        ),
+        timestamp=datetime.datetime.now(datetime.timezone.utc),
+    )
+    logger.info("[nlp-test] Smoke test started — query_id=%s", task.query_id)
+    await process(_FakeMsg(task))
+    logger.info("[nlp-test] Smoke test completed successfully.")
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    import argparse
+
+    _parser = argparse.ArgumentParser(description="NLP Worker")
+    _parser.add_argument(
+        "--test",
+        action="store_true",
+        help="Run a single smoke-test message through the pipeline and exit "
+             "(skips Prometheus server startup to avoid port conflicts).",
+    )
+    _args = _parser.parse_args()
+
+    if _args.test:
+        asyncio.run(_run_smoke_test())
+    else:
+        asyncio.run(main())
