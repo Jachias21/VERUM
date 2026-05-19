@@ -13,6 +13,7 @@ Run modes:
 """
 from __future__ import annotations
 
+import logging
 import os
 import socket
 import ssl
@@ -33,6 +34,10 @@ from qdrant_client.models import (
 )
 
 load_dotenv()
+
+logger = logging.getLogger("verum.etl")
+
+from app.seed_classics import CLASSIC_HOAXES  # noqa: E402
 
 # Fact-checking RSS sources (extend freely)
 RSS_FEEDS = [
@@ -345,6 +350,32 @@ def run() -> None:
     )
     collection = os.getenv("QDRANT_COLLECTION", "fact_checks")
     _ensure_collection_schema(client, collection)
+
+    # ── Seed classic hoaxes if requested or collection is nearly empty ────────
+    _seed_flag = os.getenv("SEED_CLASSICS", "true").strip().lower()
+    _should_seed = _seed_flag in ("1", "true", "yes")
+    if not _should_seed:
+        try:
+            _point_count = client.count(collection_name=collection).count
+            _should_seed = _point_count < 5
+        except Exception:
+            _should_seed = False
+    if _should_seed:
+        logger.info("[etl] Seeding %d classic hoaxes into Qdrant", len(CLASSIC_HOAXES))
+        print(f"[etl] Seeding {len(CLASSIC_HOAXES)} classic hoaxes into Qdrant…")
+        seed_articles = [
+            {
+                "id": str(uuid.uuid5(uuid.NAMESPACE_URL, h["url"])),
+                "title": h["title"],
+                "summary": h["content_summary"],
+                "url": h["url"],
+                "publisher": h["source_publisher"],
+                "published": h["publish_date"],
+                "verdict": h["verdict"],
+            }
+            for h in CLASSIC_HOAXES
+        ]
+        articles = seed_articles + articles
 
     # ── Load models once — kept alive across batches ────────────────────────
     print("[etl] Loading dense model (multilingual-e5-large, ONNX)…")

@@ -7,6 +7,7 @@ import datetime
 import hashlib
 import logging
 import os
+import re
 import time
 
 import aio_pika
@@ -53,6 +54,14 @@ def _is_no_info_response(text: str) -> bool:
     """Return True if the LLM summary indicates it could not find relevant info."""
     lower = text.lower()
     return any(phrase in lower for phrase in _NO_INFO_PHRASES)
+
+
+def _sanitize_summary(summary: str) -> str:
+    """Strip spurious 'Veredicto:' / 'Fuente:' lines injected by fallback paths."""
+    cleaned = re.sub(r"(?im)^[\s*]*veredicto?:\s*.+$", "", summary)
+    cleaned = re.sub(r"(?im)^[\s*]*fuente:\s*.+$", "", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
 
 
 async def _send_telegram_reply(chat_id: int, text: str) -> None:
@@ -164,9 +173,10 @@ async def process(message: aio_pika.abc.AbstractIncomingMessage) -> None:
                     reply = "🟡 *No encontré información verificada sobre esto.*\n\n" + result.summary
                 else:
                     verdict_emoji = {"FAKE": "🔴", "REAL": "🟢", "UNVERIFIED": "🟡"}.get(result.verdict, "⚪")
+                    _clean_summary = _sanitize_summary(result.summary)
                     reply = (
                         f"{verdict_emoji} *Veredicto: {result.verdict}*\n\n"
-                        f"{result.summary}\n\n"
+                        f"{_clean_summary}\n\n"
                         f"📎 Fuente: {result.source_url or 'Sin coincidencias en la base de datos.'}"
                     )
                     if cache_hit:

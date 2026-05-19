@@ -56,17 +56,33 @@ def extract_entities(text: str) -> list[str]:
     logger.debug("[ner] Detected language: %s", lang)
     doc = _get_nlp(lang)(clean)
 
-    entities: list[str] = []
+    # ── Named entities (always included) ─────────────────────────────────────
+    ner_entities: list[str] = [ent.text.strip() for ent in doc.ents]
+    ner_lower: set[str] = {e.lower() for e in ner_entities}
 
-    # Named entities (PER, ORG, LOC, MISC)
-    for ent in doc.ents:
-        entities.append(ent.text.strip())
+    # ── Noun chunks (always combined, not just as fallback) ───────────────────
+    filtered_chunks: list[str] = []
+    for chunk in doc.noun_chunks:
+        chunk_text = chunk.text.strip()
+        # Must be at least 3 chars and have a non-stopword head
+        if len(chunk_text) < 3 or chunk.root.is_stop:
+            continue
+        chunk_lower = chunk_text.lower()
+        # Skip if already covered by (or covering) a named entity
+        if any(chunk_lower in ne or ne in chunk_lower for ne in ner_lower):
+            continue
+        filtered_chunks.append(chunk_text)
 
-    # Key noun chunks as fallback when NER yields nothing
-    if not entities:
-        entities = [chunk.text.strip() for chunk in doc.noun_chunks]
+    # Sort chunks by length descending so longer (more informative) ones fill slots first
+    filtered_chunks.sort(key=len, reverse=True)
 
-    return list(dict.fromkeys(e for e in entities if len(e) > 2))  # deduplicate
+    # Combine: NER first, then chunks, capped at 8
+    MAX_ENTITIES = 8
+    combined = ner_entities + filtered_chunks
+    result = list(dict.fromkeys(e for e in combined if len(e) > 2))[:MAX_ENTITIES]
+
+    logger.info("[ner] Extracted %d entities: %s", len(result), result)
+    return result
 
 
 def is_gibberish(text: str) -> bool:
@@ -97,6 +113,15 @@ def is_gibberish(text: str) -> bool:
         logger.debug("[ner] Gibberish fast-path triggered for text=%.20r", text)
         return True
 
+    # ── Vowel fast-path: most alphabetic tokens lack any vowel → gibberish ────
+    _VOWELS = set("aeiouáéíóúü")
+    ws_alpha = [t for t in clean.split() if t.isalpha()]
+    if ws_alpha:
+        no_vowel_count = sum(1 for t in ws_alpha if not _VOWELS.intersection(t.lower()))
+        if no_vowel_count / len(ws_alpha) > 0.50:
+            logger.debug("[ner] Gibberish vowel fast-path triggered for text=%.20r", text)
+            return True
+
     lang = _detect_language(clean)
     logger.debug("[ner] is_gibberish lang: %s", lang)
     doc = _get_nlp(lang)(clean)
@@ -119,4 +144,7 @@ def is_gibberish(text: str) -> bool:
         len(meaningful_tokens) < 4,
         unknown_ratio > 0.60,
     ]
+    # Decisive combo: very few meaningful tokens AND very short avg length
+    if len(meaningful_tokens) < 4 and avg_len < 4.5:
+        return True
     return sum(conditions) >= 2

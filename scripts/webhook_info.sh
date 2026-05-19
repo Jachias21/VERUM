@@ -58,7 +58,7 @@ if not d.get('ok'):
     print('[!!] Error de Telegram: ' + d.get('description', 'desconocido'))
     sys.exit(1)
 r = d.get('result', {})
-url        = r.get('url', '(no configurada)')
+url        = r.get('url') or '(no registrado)'
 pending    = str(r.get('pending_update_count', 0))
 last_error = r.get('last_error_message', 'ninguno')
 ip         = r.get('ip_address', 'desconocida')

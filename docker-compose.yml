@@ -47,6 +47,32 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
+    environment:
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        ollama serve &
+        SERVE_PID=$$!
+        echo '[ollama-init] Waiting for Ollama API...'
+        until curl -sf http://localhost:11434/api/tags >/dev/null 2>&1; do
+          sleep 2
+        done
+        echo "[ollama-init] API ready. Checking model $$OLLAMA_MODEL ..."
+        if ! ollama list 2>/dev/null | grep -q "$$OLLAMA_MODEL"; then
+          echo "[ollama-init] Pulling $$OLLAMA_MODEL (first boot) ..."
+          ollama pull "$$OLLAMA_MODEL"
+          echo '[ollama-init] Pull complete.'
+        else
+          echo "[ollama-init] Model $$OLLAMA_MODEL already present."
+        fi
+        wait $$SERVE_PID
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags | grep -q \"$$OLLAMA_MODEL\""]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+      start_period: 180s
     # AMD ROCm GPU — uncomment on home-lab
     # devices:
     #   - /dev/kfd
@@ -103,7 +129,7 @@ services:
       mongodb:
         condition: service_started
       ollama:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
 
   dashboard:

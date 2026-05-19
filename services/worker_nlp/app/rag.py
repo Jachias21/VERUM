@@ -101,9 +101,17 @@ async def hybrid_search(
         "L1 miss (score=%.3f, threshold=%.2f) — activating L2 fallback for query_id=%s",
         l1_score, threshold, query_id,
     )
+    try:
+        from langdetect import detect
+        _lang = detect(text)
+        if _lang not in ("es", "en"):
+            _lang = "en"  # default to English for maximum international coverage
+    except Exception:
+        _lang = "es"
+    logger.info("[rag] L2 querying with lang=%s for query_id=%s", _lang, query_id)
     google_hits, gnews_hits = await asyncio.gather(
-        _search_google_fact_check(l2_query),
-        _search_gnews(l2_query),
+        _search_google_fact_check(l2_query, lang=_lang),
+        _search_gnews(l2_query, lang=_lang),
     )
     logger.info(
         "L2 results — Google FC returned %d claims, GNews returned %d articles for query_id=%s",
@@ -138,13 +146,31 @@ async def hybrid_search(
     if local_hits:
         best = local_hits[0]
         score = best["score"]
-        if score >= min_relevance:
+        if score >= threshold:
+            # High-confidence hit: trust the stored verdict directly
             return NLPResult(
                 query_id=query_id,
                 extracted_entities=entities,
                 fact_check_matches=len(local_hits),
                 source_url=best.get("url"),
                 verdict=best.get("verdict", "UNVERIFIED"),
+                retrieved_context=best.get("text", ""),
+                summary="",
+            )
+        if score >= min_relevance:
+            # Moderate-confidence hit: pass context to LLM but start neutral so a
+            # topic-mismatch cannot propagate a stored FAKE/REAL to the user.
+            logger.info(
+                "[rag] Last-resort hit score=%.3f (min_relevance=%.2f < threshold=%.2f) "
+                "— forcing verdict=UNVERIFIED for query_id=%s",
+                score, min_relevance, threshold, query_id,
+            )
+            return NLPResult(
+                query_id=query_id,
+                extracted_entities=entities,
+                fact_check_matches=len(local_hits),
+                source_url=best.get("url"),
+                verdict="UNVERIFIED",
                 retrieved_context=best.get("text", ""),
                 summary="",
             )
@@ -173,9 +199,8 @@ async def synthesize_verdict(text: str, result: NLPResult) -> str:
 
     if not retrieved_article:
         return (
-            f"Veredicto: {result.verdict}\n"
-            f"Fuentes consultadas: {result.fact_check_matches}\n"
-            f"Referencia: {result.source_url or 'Sin coincidencias en la base de datos.'}"
+            "No se ha encontrado un artículo de referencia con suficiente relevancia "
+            "para emitir un veredicto fundamentado."
         )
 
     _ollama_host = os.getenv("OLLAMA_HOST", "ollama")
@@ -199,6 +224,10 @@ async def synthesize_verdict(text: str, result: NLPResult) -> str:
             "falso, el veredicto debe comenzar con 'VEREDICTO: FALSO'. "
             "Si confirma la veracidad, debe comenzar con 'VEREDICTO: VERDADERO'. "
             "Si no hay suficiente información, usar 'VEREDICTO: NO VERIFICADO'.\n\n"
+            "IMPORTANTE: Si el artículo de referencia trata de un TEMA DISTINTO al del mensaje viral "
+            "(aunque comparta alguna palabra clave como una ciudad o un nombre genérico), "
+            "responde 'VEREDICTO: NO VERIFICADO' y explica brevemente que no hay información "
+            "relevante para confirmar o desmentir el mensaje.\n\n"
             "VEREDICTO:"
         ),
     )
@@ -231,17 +260,20 @@ async def synthesize_verdict(text: str, result: NLPResult) -> str:
             )
             if attempt == MAX_RETRIES:
                 return (
-                    f"Veredicto: {result.verdict}\n"
-                    f"[El modelo de síntesis tardó demasiado. Fuente: {result.source_url or 'N/A'}]"
+                    "El modelo de síntesis tardó demasiado en responder. "
+                    "Consulta directamente la fuente para verificar manualmente."
                 )
             await asyncio.sleep(2 ** attempt)
         except Exception as exc:
             logger.error("[rag] Ollama synthesis error (attempt %d/%d): %s", attempt + 1, MAX_RETRIES + 1, exc)
             if attempt == MAX_RETRIES:
-                return f"Veredicto: {result.verdict}\nFuente: {result.source_url or 'N/A'}"
+                return (
+                    "No se ha podido generar el resumen explicativo. "
+                    "Consulta directamente la fuente."
+                )
             await asyncio.sleep(2 ** attempt)
     # Unreachable, but satisfies type checkers
-    return f"Veredicto: {result.verdict}\nFuente: {result.source_url or 'N/A'}"
+    return "No se ha podido generar el resumen explicativo. Consulta directamente la fuente."
 
 
 def _extract_verdict_from_llm_output(text: str) -> str | None:
@@ -356,11 +388,11 @@ def _parse_google_claims(claims: list) -> list[dict]:
     return results
 
 
-async def _search_google_fact_check(query: str) -> list[dict]:
+async def _search_google_fact_check(query: str, lang: str = "es") -> list[dict]:
     """Call Google Fact Check Tools API and normalise results.
 
-    First attempts with languageCode=es; if that returns 0 claims, retries
-    without languageCode to capture Latin-American fact-checks.
+    First attempts with languageCode=<lang>; if that returns 0 claims, retries
+    without languageCode to capture fact-checks in any language.
     Results are cached in memory for 5 minutes to avoid redundant API calls.
     """
     cache_key = query.strip().lower()
@@ -377,7 +409,7 @@ async def _search_google_fact_check(query: str) -> list[dict]:
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
-                url, params={"query": query, "key": api_key, "languageCode": "es"}
+                url, params={"query": query, "key": api_key, "languageCode": lang}
             )
             if resp.status_code != 200:
                 logger.warning("[rag] Google FC API returned HTTP %d", resp.status_code)
@@ -402,7 +434,7 @@ async def _search_google_fact_check(query: str) -> list[dict]:
         return []
 
 
-async def _search_gnews(query: str) -> list[dict]:
+async def _search_gnews(query: str, lang: str = "es") -> list[dict]:
     """Search GNews API for fact-check related articles.
 
     Returns [] silently when GNEWS_API_KEY is absent or the request fails.
@@ -412,7 +444,7 @@ async def _search_gnews(query: str) -> list[dict]:
         logger.warning("[rag] GNews API: key not configured — skipping")
         return []
     logger.info("[rag] GNews API: key_present=True, querying...")
-    url = f"https://gnews.io/api/v4/search?q={query}&lang=es&token={api_key}&max=5"
+    url = f"https://gnews.io/api/v4/search?q={query}&lang={lang}&token={api_key}&max=5"
     try:
         async with httpx.AsyncClient(timeout=8) as client:
             resp = await client.get(url)

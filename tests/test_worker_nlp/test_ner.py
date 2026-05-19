@@ -112,7 +112,18 @@ def test_is_gibberish_very_short_text():
     assert is_gibberish("hi") is True
 
 
-# ── Test 6: extract_entities with English text → uses en_core_web_sm ─────────
+# ── Test 6: is_gibberish with long random tokens (no vowels) ────────────────
+
+@spacy_required
+def test_is_gibberish_long_random_tokens():
+    from services.worker_nlp.app.ner import is_gibberish
+
+    assert is_gibberish(
+        "asdf qwer zxcv 1234 ñlkj mnbv poiu hgfd asdrrg efef pqpwpwpe"
+    ) is True
+
+
+# ── Test 7: extract_entities with English text → uses en_core_web_sm ─────────
 
 @spacy_required
 @en_spacy_required

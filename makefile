@@ -32,6 +32,7 @@ PYTHON := $(shell python3 --version >/dev/null 2>&1 && echo python3 || echo pyth
         shell shell-nlp shell-bot \
         ps health status \
         qdrant-check mongo-check rabbit-check \
+        ollama-pull ollama-list \
         nlp-test etl-run \
         test-build test test-nlp test-etl test-gateway test-integration \
         webhook webhook-info webhook-delete
@@ -84,6 +85,8 @@ help:
 	@echo "  make qdrant-check   Colecciones en Qdrant"
 	@echo "  make rabbit-check   Estado de colas RabbitMQ"
 	@echo "  make mongo-check    Documentos en MongoDB"
+	@echo "  make ollama-pull    Descarga el modelo OLLAMA_MODEL en el contenedor"
+	@echo "  make ollama-list    Lista los modelos instalados en Ollama"
 	@echo ""
 	@echo "--- Webhook Telegram (con ngrok) ------------"
 	@echo "  make webhook        Detecta URL de ngrok y registra webhook automaticamente"
@@ -314,6 +317,21 @@ mongo-check:
 	  mongosh --quiet --eval \
 	  "db.getSiblingDB('verum').queries.countDocuments({}).then(n => print('  Total queries registradas: ' + n))" \
 	  2>/dev/null || echo "[!!] No se puede conectar a MongoDB"
+	@echo ""
+
+## Descarga el modelo OLLAMA_MODEL en el contenedor Ollama
+ollama-pull:
+	@echo ""
+	@echo "[>>] Descargando modelo $${OLLAMA_MODEL:-llama3.2:3b} en Ollama..."
+	@docker compose -p $(PROJECT_NAME) -f $(COMPOSE_FILE) exec $(OLLAMA_SERVICE) ollama pull $${OLLAMA_MODEL:-llama3.2:3b}
+	@echo "[OK] Modelo descargado."
+	@echo ""
+
+## Lista los modelos instalados en el contenedor Ollama
+ollama-list:
+	@echo ""
+	@echo "--- Modelos en Ollama ---"
+	@docker compose -p $(PROJECT_NAME) -f $(COMPOSE_FILE) exec $(OLLAMA_SERVICE) ollama list
 	@echo ""
 
 # =============================================================================

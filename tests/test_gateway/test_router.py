@@ -142,7 +142,11 @@ async def test_rate_limit_blocks_after_max():
 
     # Rate-limited: nothing published to the queue
     mock_channel.default_exchange.publish.assert_not_called()
-    # User receives the courtesy rate-limit message
-    mock_interim.assert_called_once()
-    call_text = mock_interim.call_args[0][1]
-    assert "⏳" in call_text or "demasiados" in call_text
+    # User receives the courtesy rate-limit message.
+    # NOTE: route_message also schedules an analysis interim via asyncio.create_task
+    # before reaching the rate-limit check, so the mock may be called 1 or 2 times.
+    assert mock_interim.called, "_send_interim_message was never called"
+    all_texts = [c[0][1] for c in mock_interim.call_args_list]
+    assert any("⏳" in t or "demasiados" in t for t in all_texts), (
+        f"Expected rate-limit message in calls, got: {all_texts}"
+    )
