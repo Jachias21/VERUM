@@ -149,8 +149,10 @@ def test_extract_entities_noun_chunks_fallback():
 
     mock_chunk1 = MagicMock()
     mock_chunk1.text = "el texto extraño"
+    mock_chunk1.root.is_stop = False
     mock_chunk2 = MagicMock()
     mock_chunk2.text = "las palabras raras"
+    mock_chunk2.root.is_stop = False
 
     mock_doc = MagicMock()
     mock_doc.ents = []  # No named entities

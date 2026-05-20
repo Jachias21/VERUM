@@ -118,7 +118,10 @@ def is_gibberish(text: str) -> bool:
     ws_alpha = [t for t in clean.split() if t.isalpha()]
     if ws_alpha:
         no_vowel_count = sum(1 for t in ws_alpha if not _VOWELS.intersection(t.lower()))
-        if no_vowel_count / len(ws_alpha) > 0.50:
+        # With >= 5 tokens we have enough statistical signal to lower the threshold;
+        # keyboard-mash patterns (e.g. "asdf qwer zxcv") have ~40 % vowel-less tokens.
+        threshold = 0.40 if len(ws_alpha) >= 5 else 0.50
+        if no_vowel_count / len(ws_alpha) >= threshold:
             logger.debug("[ner] Gibberish vowel fast-path triggered for text=%.20r", text)
             return True
 

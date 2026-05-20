@@ -37,7 +37,7 @@ load_dotenv()
 
 logger = logging.getLogger("verum.etl")
 
-from app.seed_classics import CLASSIC_HOAXES  # noqa: E402
+from .seed_classics import CLASSIC_HOAXES  # noqa: E402
 
 # Fact-checking RSS sources (extend freely)
 RSS_FEEDS = [

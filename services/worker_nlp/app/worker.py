@@ -13,6 +13,7 @@ import time
 import aio_pika
 from dotenv import load_dotenv
 from prometheus_client import start_http_server
+import telegram.error
 from telegram import Bot
 
 logger = logging.getLogger(__name__)
@@ -64,19 +65,48 @@ def _sanitize_summary(summary: str) -> str:
     return cleaned.strip()
 
 
+def _escape_html(text: str) -> str:
+    """Escape the three characters reserved by Telegram's HTML parser."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 async def _send_telegram_reply(chat_id: int, text: str) -> None:
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
         logger.error("_send_telegram_reply: TELEGRAM_BOT_TOKEN is not set — skipping reply to chat_id=%s", chat_id)
         return
+    bot = Bot(token=token)
     try:
-        bot = Bot(token=token)
         await bot.send_message(
             chat_id=chat_id,
             text=text,
-            parse_mode="Markdown",
+            parse_mode="HTML",
             disable_web_page_preview=True,
         )
+    except telegram.error.BadRequest as e:
+        err_str = str(e).lower()
+        if "parse" in err_str or "entity" in err_str or "can't find end" in err_str:
+            logger.warning(
+                "_send_telegram_reply: HTML parse error for chat_id=%s (%s) — retrying as plain text",
+                chat_id, e,
+            )
+            try:
+                plain = re.sub(r"<[^>]+>", "", text)
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=plain,
+                    disable_web_page_preview=True,
+                )
+            except Exception as inner_e:
+                logger.error(
+                    "_send_telegram_reply: plain-text fallback also failed for chat_id=%s — %s: %s",
+                    chat_id, type(inner_e).__name__, inner_e,
+                )
+        else:
+            logger.error(
+                "_send_telegram_reply: failed to send message to chat_id=%s — %s: %s",
+                chat_id, type(e).__name__, e,
+            )
     except Exception as e:
         logger.error(
             "_send_telegram_reply: failed to send message to chat_id=%s — %s: %s",
@@ -170,17 +200,18 @@ async def process(message: aio_pika.abc.AbstractIncomingMessage) -> None:
             if task.chat_id:
                 _no_info_override = not cache_hit and _is_no_info_response(result.summary)
                 if _no_info_override:
-                    reply = "🟡 *No encontré información verificada sobre esto.*\n\n" + result.summary
+                    reply = "🟡 <b>No encontré información verificada sobre esto.</b>\n\n" + _escape_html(result.summary)
                 else:
                     verdict_emoji = {"FAKE": "🔴", "REAL": "🟢", "UNVERIFIED": "🟡"}.get(result.verdict, "⚪")
-                    _clean_summary = _sanitize_summary(result.summary)
+                    _clean_summary = _escape_html(_sanitize_summary(result.summary))
+                    _source = _escape_html(result.source_url or "Sin coincidencias en la base de datos.")
                     reply = (
-                        f"{verdict_emoji} *Veredicto: {result.verdict}*\n\n"
+                        f"{verdict_emoji} <b>Veredicto: {result.verdict}</b>\n\n"
                         f"{_clean_summary}\n\n"
-                        f"📎 Fuente: {result.source_url or 'Sin coincidencias en la base de datos.'}"
+                        f"📎 Fuente: {_source}"
                     )
                     if cache_hit:
-                        reply += "\n\n⚡ *(respuesta cacheada)*"
+                        reply += "\n\n⚡ <i>(respuesta cacheada)</i>"
                 await _send_telegram_reply(task.chat_id, reply)
 
             print(f"[nlp] {task.query_id} → {result.verdict} ({elapsed_ms}ms)")

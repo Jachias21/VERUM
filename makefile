@@ -23,6 +23,15 @@ TEST_SERVICE      := test_runner
 # Auto-detect python command
 PYTHON := $(shell python3 --version >/dev/null 2>&1 && echo python3 || echo python)
 
+# ── Load credentials from .env for health-check targets ─────────────────────
+# Uses sed so it is safe with inline comments and Windows CR endings (MINGW64).
+RABBITMQ_USER ?= $(shell sed -n 's/^RABBITMQ_USER=//p' .env 2>/dev/null | tr -d '\r')
+RABBITMQ_PASS ?= $(shell sed -n 's/^RABBITMQ_PASS=//p' .env 2>/dev/null | tr -d '\r')
+MONGO_USER    ?= $(shell sed -n 's/^MONGO_USER=//p'    .env 2>/dev/null | tr -d '\r')
+MONGO_PASS    ?= $(shell sed -n 's/^MONGO_PASS=//p'    .env 2>/dev/null | tr -d '\r')
+MONGO_DB      ?= $(shell sed -n 's/^MONGO_DB=//p'      .env 2>/dev/null | tr -d '\r')
+export RABBITMQ_USER RABBITMQ_PASS MONGO_USER MONGO_PASS MONGO_DB
+
 # -- Default -----------------------------------------------------------------
 .DEFAULT_GOAL := help
 
@@ -303,20 +312,33 @@ qdrant-check:
 rabbit-check:
 	@echo ""
 	@echo "--- Colas en RabbitMQ ---"
-	@curl -sf -u $${RABBITMQ_USER:-verum}:$${RABBITMQ_PASS:-verum_pass} http://localhost:15672/api/queues | \
-	  $(PYTHON) -c "import sys,json; qs=json.load(sys.stdin); \
-	  [print(f'  {q[\"name\"]}: {q[\"messages\"]} msgs, {q[\"consumers\"]} consumers') for q in qs]" \
-	  2>/dev/null || echo "[!!] No se puede conectar a RabbitMQ management en :15672"
+	@if docker ps --filter name=verum_rabbitmq --format '{{.Names}}' 2>/dev/null | grep -q verum_rabbitmq; then \
+	    curl -sf -u "$${RABBITMQ_USER:-verum}:$${RABBITMQ_PASS:-verum_pass}" http://localhost:15672/api/queues \
+	      | $(PYTHON) -c "import sys,json; qs=json.load(sys.stdin); \
+	        [print(f'  {q[\"name\"]}: {q[\"messages\"]} msgs, {q[\"consumers\"]} consumers') for q in qs]" \
+	      2>/dev/null \
+	      || echo "[!!] No se puede conectar a RabbitMQ management en localhost:15672"; \
+	  else \
+	    echo "[!!] El contenedor verum_rabbitmq no está en ejecución. Lanza 'make up' primero."; \
+	  fi
 	@echo ""
 
 ## Consulta estadisticas basicas de MongoDB
 mongo-check:
 	@echo ""
 	@echo "--- Estadisticas MongoDB ---"
-	@docker compose -p $(PROJECT_NAME) -f $(COMPOSE_FILE) exec -T $(MONGO_SERVICE) \
-	  mongosh --quiet --eval \
-	  "db.getSiblingDB('verum').queries.countDocuments({}).then(n => print('  Total queries registradas: ' + n))" \
-	  2>/dev/null || echo "[!!] No se puede conectar a MongoDB"
+	@if docker ps --filter name=verum_mongodb --format '{{.Names}}' 2>/dev/null | grep -q verum_mongodb; then \
+	    docker compose -p $(PROJECT_NAME) -f $(COMPOSE_FILE) exec -T $(MONGO_SERVICE) \
+	      mongosh --quiet \
+	        -u "$${MONGO_USER:-verum}" \
+	        -p "$${MONGO_PASS:-verum_pass}" \
+	        --authenticationDatabase admin \
+	        --eval "db.getSiblingDB('$${MONGO_DB:-verum}').queries.countDocuments({}).then(n => print('  Total queries registradas: ' + n))" \
+	      2>/dev/null \
+	      || echo "[!!] No se puede conectar a MongoDB"; \
+	  else \
+	    echo "[!!] El contenedor verum_mongodb no está en ejecución. Lanza 'make up' primero."; \
+	  fi
 	@echo ""
 
 ## Descarga el modelo OLLAMA_MODEL en el contenedor Ollama
