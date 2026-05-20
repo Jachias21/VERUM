@@ -59,9 +59,42 @@ def _is_no_info_response(text: str) -> bool:
 
 
 def _sanitize_summary(summary: str) -> str:
-    """Strip spurious 'Veredicto:' / 'Fuente:' lines injected by fallback paths."""
-    cleaned = re.sub(r"(?im)^[\s*]*veredicto?:\s*.+$", "", summary)
+    """Strip the VEREDICTO: prefix from LLM output while preserving the explanation.
+
+    The LLM often responds in a single line:
+        "VEREDICTO: FALSO — Según el artículo, Mercadona desmintió..."
+    or without the prefix:
+        "FALSO — Según el artículo..."
+
+    We strip only the verdict keyword and keep the explanation that follows the
+    separator (' — ', ' - ', ' – ').  If there is no separator we strip the
+    whole VEREDICTO: line only when it stands alone (no explanation text).
+    We also strip spurious 'Fuente:' / URL lines injected by fallback paths or
+    hallucinated by the LLM.
+    """
+    # 1. Strip "VEREDICTO: FALSO — " / "VEREDICTO: VERDADERO — " / "VEREDICTO: NO VERIFICADO — "
+    #    keeping everything after the separator.
+    cleaned = re.sub(
+        r"(?im)^[\s*]*veredicto?:\s*(?:falso|verdadero|no[\s_-]verificado)\s*[-–—]+\s*",
+        "",
+        summary,
+    )
+    # 2. Strip a bare "VEREDICTO: XXXX" line that has NO explanation after it.
+    cleaned = re.sub(
+        r"(?im)^[\s*]*veredicto?:\s*(?:falso|verdadero|no[\s_-]verificado)\s*$",
+        "",
+        cleaned,
+    )
+    # 3. Strip bare verdict keywords at the very start of the text (LLM echo without prefix).
+    cleaned = re.sub(
+        r"(?im)^(falso|verdadero|no[\s_-]verificado)\s*[-–—]+\s*",
+        "",
+        cleaned,
+    )
+    # 4. Strip 'Fuente:' lines (spurious from fallback paths or hallucinated by LLM).
     cleaned = re.sub(r"(?im)^[\s*]*fuente:\s*.+$", "", cleaned)
+    # 5. Strip bare URLs the LLM may hallucinate.
+    cleaned = re.sub(r"(?im)^https?://\S+\s*$", "", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
 

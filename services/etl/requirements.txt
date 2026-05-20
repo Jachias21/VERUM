@@ -19,5 +19,5 @@ tail
 motor
 prometheus_client
 spacy
-opencv-python
+opencv-python-headless
 torchvision

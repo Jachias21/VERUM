@@ -138,8 +138,9 @@ def test_topic_overlap_score_empty_entities():
 # ── Test 10: hybrid_search with high-confidence Qdrant hit ───────────────────
 
 async def test_hybrid_search_qdrant_hit(mock_qdrant_hits):
+    fastembed = pytest.importorskip("fastembed", reason="fastembed not installed")
     import numpy as np
-    from fastembed import SparseEmbedding
+    SparseEmbedding = fastembed.SparseEmbedding
 
     fake_dense = [0.1] * 1024
     fake_sparse = SparseEmbedding(
@@ -166,11 +167,12 @@ async def test_hybrid_search_qdrant_hit(mock_qdrant_hits):
 # ── Test 11: hybrid_search falls back to Google when Qdrant score is low ─────
 
 async def test_hybrid_search_google_fallback():
+    fastembed = pytest.importorskip("fastembed", reason="fastembed not installed")
     import numpy as np
-    from fastembed import SparseEmbedding
+    SparseEmbedding = fastembed.SparseEmbedding
 
     low_score_hit = [{"score": 0.30, "url": "https://qdrant.example.com", "verdict": "UNVERIFIED", "text": ""}]
-    google_hits = [{"score": 1.0, "url": "https://factcheck.google.com/claim/1", "verdict": "FAKE", "text": "Fact checked article text."}]
+    google_hits = [{"score": 1.0, "url": "https://factcheck.google.com/claim/1", "verdict": "FAKE", "text": "Noticia de prueba para test — artículo verificado sobre Madrid."}]
 
     fake_dense = [0.1] * 1024
     fake_sparse = SparseEmbedding(
@@ -323,7 +325,7 @@ async def test_hybrid_search_uses_gnews_when_google_fc_empty():
             "score": 0.7,
             "verdict": "FAKE",
             "url": "https://gnews.example.com/article/gnews1",
-            "text": "Este bulo ha sido desmentido por múltiples fuentes.",
+            "text": "Este bulo sobre el virus en Madrid ha sido desmentido por múltiples fuentes.",
         }
     ]
 
@@ -338,7 +340,7 @@ async def test_hybrid_search_uses_gnews_when_google_fc_empty():
 
     assert result.verdict == "FAKE"
     assert result.source_url == "https://gnews.example.com/article/gnews1"
-    assert result.retrieved_context == "Este bulo ha sido desmentido por múltiples fuentes."
+    assert result.retrieved_context == "Este bulo sobre el virus en Madrid ha sido desmentido por múltiples fuentes."
     assert result.fact_check_matches == 1
 
 
@@ -352,7 +354,7 @@ async def test_hybrid_search_prioritizes_google_fc_over_gnews():
             "score": 1.0,
             "verdict": "REAL",
             "url": "https://factcheck.google.com/claim/99",
-            "text": "La afirmación es verdadera según múltiples fuentes verificadas.",
+            "text": "La afirmación sobre Madrid es verdadera según múltiples fuentes verificadas.",
         }
     ]
     gnews_hit = [
@@ -360,7 +362,7 @@ async def test_hybrid_search_prioritizes_google_fc_over_gnews():
             "score": 0.7,
             "verdict": "FAKE",
             "url": "https://gnews.example.com/article/99",
-            "text": "Artículo de GNews con veredicto diferente.",
+            "text": "Artículo de GNews sobre Madrid con veredicto diferente.",
         }
     ]
 
@@ -375,4 +377,4 @@ async def test_hybrid_search_prioritizes_google_fc_over_gnews():
 
     assert result.verdict == "REAL"
     assert result.source_url == "https://factcheck.google.com/claim/99"
-    assert result.retrieved_context == "La afirmación es verdadera según múltiples fuentes verificadas."
+    assert result.retrieved_context == "La afirmación sobre Madrid es verdadera según múltiples fuentes verificadas."

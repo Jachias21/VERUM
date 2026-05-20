@@ -129,7 +129,7 @@ async def hybrid_search(
             )
 
     # ── Level 2: parallel fallback (Google Fact Check + GNews) ─────────────────
-    l2_query = " ".join(entities) if entities else text[:200]
+    l2_query = _build_l2_query(entities, text)
     l1_score = local_hits[0]["score"] if local_hits else 0.0
 
     logger.warning(
@@ -587,10 +587,13 @@ async def _search_gnews(query: str, lang: str = "es") -> list[dict]:
         logger.warning("[rag] GNews API: key not configured — skipping")
         return []
     logger.info("[rag] GNews API: key_present=True, querying...")
-    url = f"https://gnews.io/api/v4/search?q={query}&lang={lang}&token={api_key}&max=5"
+    url = "https://gnews.io/api/v4/search"
     try:
         async with httpx.AsyncClient(timeout=8) as client:
-            resp = await client.get(url)
+            resp = await client.get(
+                url,
+                params={"q": query, "lang": lang, "token": api_key, "max": 5},
+            )
             resp.raise_for_status()
             articles = resp.json().get("articles", [])
     except Exception as exc:
@@ -629,3 +632,27 @@ def _normalise_rating(rating: str) -> str:
     if any(w in rating_lower for w in _REAL_KEYWORDS):
         return "REAL"
     return "UNVERIFIED"
+
+
+def _build_l2_query(entities: list[str], fallback_text: str) -> str:
+    """Build a concise, clean search query for L2 APIs from extracted entities.
+
+    Filters out long/noisy noun phrases (> 4 words or > 40 characters) that
+    tend to break keyword-based search APIs, and limits the result to the top
+    5 remaining entities.  Falls back to the first 100 characters of the
+    original text when no suitable entities are available.
+    """
+    if not entities:
+        return fallback_text[:100]
+
+    # Keep only short, clean tokens: ≤ 4 words and ≤ 40 characters
+    clean = [e for e in entities if len(e) <= 40 and len(e.split()) <= 4]
+
+    # If the filter removed everything, fall back to the original list but
+    # still cap length so the query is not enormous.
+    if not clean:
+        clean = [e[:40] for e in entities]
+
+    # Take at most 5 most prominent entities (NER returns them in order of appearance)
+    selected = clean[:5]
+    return " ".join(selected)

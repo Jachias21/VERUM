@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+pytest.importorskip("aio_pika", reason="aio_pika not installed (Docker-only dependency)")
+
 from shared.schemas import ImageTask, TextTask
 
 

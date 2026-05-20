@@ -8,6 +8,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+pytest.importorskip("feedparser", reason="feedparser not installed (Docker-only dependency)")
+
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
