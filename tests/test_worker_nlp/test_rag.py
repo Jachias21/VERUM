@@ -49,7 +49,8 @@ def test_extract_verdict_unverified():
 def test_extract_verdict_no_match():
     from services.worker_nlp.app.rag import _extract_verdict_from_llm_output
 
-    assert _extract_verdict_from_llm_output("No hay suficiente información disponible.") is None
+    # A truly neutral statement that matches none of the verdict patterns
+    assert _extract_verdict_from_llm_output("El artículo discute varios aspectos del tema.") is None
 
 
 def test_extract_verdict_no_verified_before_verified():
@@ -58,6 +59,80 @@ def test_extract_verdict_no_verified_before_verified():
     assert _extract_verdict_from_llm_output(
         "VEREDICTO: NO VERIFICADO por falta de fuentes verificables"
     ) == "UNVERIFIED"
+
+
+# ── New tests: Tier-2 natural-language verdict extraction ─────────────────────
+
+def test_extract_verdict_natural_language_fake():
+    from services.worker_nlp.app.rag import _extract_verdict_from_llm_output
+
+    assert _extract_verdict_from_llm_output(
+        "Después de analizar el artículo, puedo concluir que el mensaje viral es falso."
+    ) == "FAKE"
+
+
+def test_extract_verdict_natural_language_desmentido():
+    from services.worker_nlp.app.rag import _extract_verdict_from_llm_output
+
+    assert _extract_verdict_from_llm_output(
+        "Esta afirmación ha sido desmentida por la CNMC."
+    ) == "FAKE"
+
+
+def test_extract_verdict_natural_language_unverified():
+    from services.worker_nlp.app.rag import _extract_verdict_from_llm_output
+
+    assert _extract_verdict_from_llm_output(
+        "No hay suficiente información en el artículo para confirmar la afirmación."
+    ) == "UNVERIFIED"
+
+
+def test_extract_verdict_strict_wins_over_natural():
+    """Tier-1 strict prefix must win even when NL signals suggest a different verdict."""
+    from services.worker_nlp.app.rag import _extract_verdict_from_llm_output
+
+    assert _extract_verdict_from_llm_output(
+        "VEREDICTO: NO VERIFICADO — aunque el texto parece falso, no hay datos."
+    ) == "UNVERIFIED"
+
+
+# ── Tests: _topic_overlap_score ───────────────────────────────────────────────
+
+def test_topic_overlap_score_zero_match():
+    from services.worker_nlp.app.rag import _topic_overlap_score
+
+    score = _topic_overlap_score(
+        ["Ébola", "virus", "pandemia"],
+        "El Real Madrid ganó la Copa de Europa en Wembley.",
+    )
+    assert score == 0.0
+
+
+def test_topic_overlap_score_full_match():
+    from services.worker_nlp.app.rag import _topic_overlap_score
+
+    score = _topic_overlap_score(
+        ["Madrid", "virus"],
+        "El brote de virus en Madrid fue confirmado por las autoridades sanitarias.",
+    )
+    assert score == 1.0
+
+
+def test_topic_overlap_score_accent_insensitive():
+    """Accented entity must match its unaccented form in the article."""
+    from services.worker_nlp.app.rag import _topic_overlap_score
+
+    score = _topic_overlap_score(
+        ["Ébola"],
+        "Los expertos hablan sobre el ebola en Africa.",
+    )
+    assert score == 1.0
+
+
+def test_topic_overlap_score_empty_entities():
+    from services.worker_nlp.app.rag import _topic_overlap_score
+
+    assert _topic_overlap_score([], "any article text here") == 0.0
 
 
 # ── Test 10: hybrid_search with high-confidence Qdrant hit ───────────────────

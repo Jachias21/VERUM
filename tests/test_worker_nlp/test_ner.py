@@ -218,6 +218,43 @@ def test_extract_entities_deduplicates():
     assert entities.count("Pedro Sánchez") == 1
 
 
+# ── Test 10: is_gibberish with long invented words that contain vowels ────────
+
+@spacy_required
+def test_is_gibberish_long_invented_words_with_vowels():
+    """Invented strings with vowels (OOV / consonant-cluster signals) → True."""
+    from services.worker_nlp.app.ner import is_gibberish
+
+    assert is_gibberish(
+        "Jsjfkwnx iajdiqbeufjfjf jgisosoe ufan irjcnauwjdjf isow os irnwiend"
+    ) is True
+
+
+# ── Test 11: is_gibberish with pseudo-acronym mash ───────────────────────────
+
+@spacy_required
+def test_is_gibberish_pseudoacronym_mash():
+    """Tokens dominated by consecutive consonant clusters → True."""
+    from services.worker_nlp.app.ner import is_gibberish
+
+    assert is_gibberish(
+        "Plkmqaxsv brnkdjwm xklqpoiuy tjsfnvbcx mnhpkrwz"
+    ) is True
+
+
+# ── Test 12: real Spanish text must NOT be flagged as gibberish (regression) ──
+
+@spacy_required
+def test_is_gibberish_real_spanish_still_passes():
+    """A well-formed Spanish sentence must not be flagged as gibberish."""
+    from services.worker_nlp.app.ner import is_gibberish
+
+    assert is_gibberish(
+        "El presidente del Gobierno de España visitó Bruselas para reunirse con "
+        "la Comisión Europea sobre los fondos de recuperación post-pandemia."
+    ) is False
+
+
 # ── Test 10: extract_entities filters entities with ≤2 characters ─────────────
 
 @spacy_importable

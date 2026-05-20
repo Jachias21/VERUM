@@ -19,6 +19,7 @@ from telegram import Bot
 logger = logging.getLogger(__name__)
 
 from shared.db import get_mongo_db
+from shared.rabbitmq_utils import build_amqp_url, mask_amqp_url
 from shared.schemas import TextTask, NLPResult, QueryLog
 from app.cache import get_cached_verdict, set_cached_verdict
 from app.metrics import nlp_processing_seconds
@@ -204,11 +205,20 @@ async def process(message: aio_pika.abc.AbstractIncomingMessage) -> None:
                 else:
                     verdict_emoji = {"FAKE": "🔴", "REAL": "🟢", "UNVERIFIED": "🟡"}.get(result.verdict, "⚪")
                     _clean_summary = _escape_html(_sanitize_summary(result.summary))
-                    _source = _escape_html(result.source_url or "Sin coincidencias en la base de datos.")
+                    if result.verdict == "UNVERIFIED" and not result.source_url:
+                        _source_line = (
+                            "💡 No encontramos esta afirmación en fuentes verificadas.\n"
+                            "Recomendamos comprobarlo manualmente en:\n"
+                            "• maldita.es · newtral.es · snopes.com · factcheck.org"
+                        )
+                    else:
+                        _source_line = "📎 Fuente: " + _escape_html(
+                            result.source_url or "Sin coincidencias en la base de datos."
+                        )
                     reply = (
                         f"{verdict_emoji} <b>Veredicto: {result.verdict}</b>\n\n"
                         f"{_clean_summary}\n\n"
-                        f"📎 Fuente: {_source}"
+                        f"{_source_line}"
                     )
                     if cache_hit:
                         reply += "\n\n⚡ <i>(respuesta cacheada)</i>"
@@ -246,13 +256,13 @@ async def process(message: aio_pika.abc.AbstractIncomingMessage) -> None:
 
 
 async def main() -> None:
-    url = (
-        f"amqp://{os.environ['RABBITMQ_USER']}:{os.environ['RABBITMQ_PASS']}"
-        f"@{os.environ['RABBITMQ_HOST']}:{os.environ['RABBITMQ_PORT']}/"
-    )
+    url = build_amqp_url()
+    max_retries = int(os.getenv("RABBITMQ_CONNECT_MAX_RETRIES", "10"))
     metrics_port = int(os.getenv("NLP_METRICS_PORT", "9101"))
     start_http_server(metrics_port)
     logger.info("[nlp worker] Prometheus metrics available on :%d/metrics", metrics_port)
+    logger.info("[nlp worker] Connecting to %s", mask_amqp_url(url))
+    attempt = 0
     while True:
         try:
             connection = await aio_pika.connect_robust(url)
@@ -262,11 +272,23 @@ async def main() -> None:
                 os.getenv("RABBITMQ_QUEUE_TEXTS", "topic_texts"), durable=True
             )
             await queue.consume(process)
+            attempt = 0  # reset on successful connection
             print("[nlp worker] Waiting for messages…")
             await asyncio.Future()
         except Exception as e:
-            logger.error("[nlp worker] RabbitMQ connection lost: %s — reconnecting in 5s", e)
-            await asyncio.sleep(5)
+            attempt += 1
+            if attempt > max_retries:
+                logger.error(
+                    "[nlp worker] RabbitMQ unreachable after %d retries — giving up",
+                    max_retries,
+                )
+                raise
+            delay = min(2 ** attempt, 30)
+            logger.error(
+                "[nlp worker] RabbitMQ connection lost: %s — reconnecting in %ds (attempt %d/%d)",
+                e, delay, attempt, max_retries,
+            )
+            await asyncio.sleep(delay)
 
 
 async def _run_smoke_test() -> None:

@@ -136,6 +136,29 @@ def is_gibberish(text: str) -> bool:
     alpha_tokens = [t for t in doc if t.is_alpha]
     alpha_count = max(len(alpha_tokens), 1)
 
+    # ── New signal 1: Out-of-Vocabulary (OOV) ratio ───────────────────────────
+    # Only meaningful when the model has word vectors (es_core_news_lg does).
+    if doc.vocab.vectors_length > 0:
+        long_alpha = [t for t in alpha_tokens if len(t.text) > 2]
+        if len(long_alpha) >= 4:
+            oov_count = sum(1 for t in long_alpha if t.is_oov)
+            oov_ratio = oov_count / len(long_alpha)
+            if oov_ratio >= 0.70:
+                logger.debug("[ner] Gibberish OOV fast-path: oov_ratio=%.2f", oov_ratio)
+                return True
+
+    # ── New signal 2: Consecutive-consonant ratio (pseudo-acronym / random mash)
+    # ñ is treated as a consonant for Spanish; pattern is language-agnostic.
+    _CONSONANT_CLUSTER = re.compile(r"[bcdfghjklmnñpqrstvwxyz]{3,}", re.IGNORECASE)
+    if ws_alpha:
+        cluster_count = sum(1 for t in ws_alpha if _CONSONANT_CLUSTER.search(t))
+        consonant_ratio = cluster_count / len(ws_alpha)
+        if consonant_ratio > 0.60:
+            logger.debug(
+                "[ner] Gibberish consonant fast-path: consonant_ratio=%.2f", consonant_ratio
+            )
+            return True
+
     alpha_ratio = len(alpha_tokens) / total
     avg_len = sum(len(t.text) for t in alpha_tokens) / alpha_count
     unknown_ratio = sum(1 for t in doc if t.pos_ == "X") / total

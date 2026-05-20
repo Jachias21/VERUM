@@ -402,3 +402,55 @@ async def test_pipeline_urls_emojis_only_degrades_to_unverified():
     text = _sent_text(mock_send)
     assert "🟡" in text
     assert "UNVERIFIED" in text or "No encontré" in text
+
+
+# ── Test 9: L2 off-topic hit → source URL suppressed, manual check suggested ─
+
+@pytest.mark.asyncio
+async def test_pipeline_l2_topic_mismatch_drops_source():
+    """L2 returns an article with no entity overlap → source_url must be None
+    and the Telegram reply must NOT contain 'https://' but MUST mention maldita.es."""
+    from services.worker_nlp.app.worker import process
+
+    task = _make_task(
+        text=(
+            "El virus del Ébola se está extendiendo por Europa según fuentes anónimas "
+            "en redes sociales. Miles de personas podrían estar en peligro."
+        )
+    )
+    message = FakeMessage(task)
+
+    # L1 returns nothing; L2 Google FC returns a football article (zero entity overlap)
+    off_topic_hit = [
+        {
+            "score": 0.60,
+            "verdict": "UNVERIFIED",
+            "text": "El Real Madrid ganó la Copa de Europa por decimoquinta vez en Wembley.",
+            "url": "https://marca.com/futbol/real-madrid/copa-europa",
+        }
+    ]
+
+    with (
+        patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "fake_token", "NLP_TOPIC_OVERLAP_MIN": "0.25"}),
+        patch("services.worker_nlp.app.worker.is_gibberish", return_value=False),
+        patch("services.worker_nlp.app.worker.get_cached_verdict", new=AsyncMock(return_value=None)),
+        patch("services.worker_nlp.app.worker.extract_entities", return_value=["Ébola", "Europa", "virus"]),
+        patch("services.worker_nlp.app.rag._search_qdrant", new=AsyncMock(return_value=[])),
+        patch("services.worker_nlp.app.rag._search_google_fact_check", new=AsyncMock(return_value=off_topic_hit)),
+        patch("services.worker_nlp.app.rag._search_gnews", new=AsyncMock(return_value=[])),
+        patch(
+            "services.worker_nlp.app.worker.synthesize_verdict",
+            new=AsyncMock(return_value="VEREDICTO: NO VERIFICADO — no hay información relevante."),
+        ),
+        patch("services.worker_nlp.app.worker.set_cached_verdict", new=AsyncMock()),
+        patch("services.worker_nlp.app.worker.get_mongo_db", return_value=_make_mongo_mock()),
+        patch("services.worker_nlp.app.worker.Bot") as MockBot,
+    ):
+        mock_send = AsyncMock()
+        MockBot.return_value.send_message = mock_send
+        await process(message)
+
+    mock_send.assert_called_once()
+    reply_text = _sent_text(mock_send)
+    assert "https://" not in reply_text, "Off-topic source URL must not appear in the reply"
+    assert "maldita.es" in reply_text, "Manual verification suggestion must appear"

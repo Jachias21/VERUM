@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import time
+import unicodedata
 import uuid
 
 import httpx
@@ -30,6 +31,40 @@ logger = logging.getLogger("verum.rag")
 
 # In-memory cache for Google Fact Check API results (asyncio single-thread, no lock needed)
 _google_fc_cache: TTLCache = TTLCache(maxsize=256, ttl=300)
+
+# ── NL verdict patterns — compiled once at import time ────────────────────────
+# Tier 2: Spanish natural-language signals
+_FAKE_NL_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b(es|son|resulta)\s+(un\s+)?(bulo|falso|falsa|mentira|fraude|fake|engaño)\b", re.IGNORECASE),
+    re.compile(r"\bha\s+sido\s+desmentid[oa]\b", re.IGNORECASE),
+    re.compile(r"\bno\s+es\s+cierto\b", re.IGNORECASE),
+    re.compile(r"\bes\s+un\s+(bulo|hoax)\b", re.IGNORECASE),
+]
+_REAL_NL_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b(es|son|resulta)\s+(verdader[oa]|ciert[oa]|real|correct[oa])\b", re.IGNORECASE),
+    re.compile(r"\bse\s+confirma\b", re.IGNORECASE),
+    re.compile(r"\bha\s+sido\s+confirmad[oa]\b", re.IGNORECASE),
+]
+_UNVERIFIED_NL_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\bno\s+(se\s+puede|hay\s+forma\s+de|hay\s+manera\s+de)\s+confirmar\b", re.IGNORECASE),
+    re.compile(r"\bno\s+hay\s+(suficiente\s+)?(información|evidencia)\b", re.IGNORECASE),
+    re.compile(r"\bno\s+menciona\b", re.IGNORECASE),
+]
+# Tier 3: English natural-language signals
+_FAKE_EN_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b(is|are|appears?\s+to\s+be)\s+(fake|false|misinformation|a\s+hoax)\b", re.IGNORECASE),
+    re.compile(r"\bhas\s+been\s+debunked\b", re.IGNORECASE),
+    re.compile(r"\bis\s+not\s+true\b", re.IGNORECASE),
+]
+_REAL_EN_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\b(is|are)\s+(true|real|accurate|correct)\b", re.IGNORECASE),
+    re.compile(r"\bhas\s+been\s+confirmed\b", re.IGNORECASE),
+]
+_UNVERIFIED_EN_PATTERNS: list[re.Pattern] = [
+    re.compile(r"\bcannot\s+be\s+confirmed\b", re.IGNORECASE),
+    re.compile(r"\bnot\s+enough\s+(information|evidence)\b", re.IGNORECASE),
+    re.compile(r"\bdoes\s+not\s+mention\b", re.IGNORECASE),
+]
 
 
 async def hybrid_search(
@@ -120,6 +155,22 @@ async def hybrid_search(
 
     if google_hits:
         best = google_hits[0]
+        min_overlap = float(os.getenv("NLP_TOPIC_OVERLAP_MIN", 0.25))
+        overlap = _topic_overlap_score(entities, best.get("text", ""))
+        if overlap < min_overlap:
+            logger.warning(
+                "[rag] L2 hit topic mismatch (overlap=%.2f < %.2f) — forcing UNVERIFIED for query_id=%s",
+                overlap, min_overlap, query_id,
+            )
+            return NLPResult(
+                query_id=query_id,
+                extracted_entities=entities,
+                fact_check_matches=0,
+                source_url=None,
+                verdict="UNVERIFIED",
+                retrieved_context="",
+                summary="",
+            )
         return NLPResult(
             query_id=query_id,
             extracted_entities=entities,
@@ -132,6 +183,22 @@ async def hybrid_search(
 
     if gnews_hits:
         best = gnews_hits[0]
+        min_overlap = float(os.getenv("NLP_TOPIC_OVERLAP_MIN", 0.25))
+        overlap = _topic_overlap_score(entities, best.get("text", ""))
+        if overlap < min_overlap:
+            logger.warning(
+                "[rag] L2 hit topic mismatch (overlap=%.2f < %.2f) — forcing UNVERIFIED for query_id=%s",
+                overlap, min_overlap, query_id,
+            )
+            return NLPResult(
+                query_id=query_id,
+                extracted_entities=entities,
+                fact_check_matches=0,
+                source_url=None,
+                verdict="UNVERIFIED",
+                retrieved_context="",
+                summary="",
+            )
         return NLPResult(
             query_id=query_id,
             extracted_entities=entities,
@@ -160,6 +227,14 @@ async def hybrid_search(
         if score >= min_relevance:
             # Moderate-confidence hit: pass context to LLM but start neutral so a
             # topic-mismatch cannot propagate a stored FAKE/REAL to the user.
+            min_overlap = float(os.getenv("NLP_TOPIC_OVERLAP_MIN", 0.25))
+            overlap = _topic_overlap_score(entities, best.get("text", ""))
+            _source_url = None if overlap < min_overlap else best.get("url")
+            if overlap < min_overlap:
+                logger.info(
+                    "[rag] Last-resort hit topic mismatch (overlap=%.2f < %.2f) — clearing source_url for query_id=%s",
+                    overlap, min_overlap, query_id,
+                )
             logger.info(
                 "[rag] Last-resort hit score=%.3f (min_relevance=%.2f < threshold=%.2f) "
                 "— forcing verdict=UNVERIFIED for query_id=%s",
@@ -169,7 +244,7 @@ async def hybrid_search(
                 query_id=query_id,
                 extracted_entities=entities,
                 fact_check_matches=len(local_hits),
-                source_url=best.get("url"),
+                source_url=_source_url,
                 verdict="UNVERIFIED",
                 retrieved_context=best.get("text", ""),
                 summary="",
@@ -226,8 +301,27 @@ async def synthesize_verdict(text: str, result: NLPResult) -> str:
             "Si no hay suficiente información, usar 'VEREDICTO: NO VERIFICADO'.\n\n"
             "IMPORTANTE: Si el artículo de referencia trata de un TEMA DISTINTO al del mensaje viral "
             "(aunque comparta alguna palabra clave como una ciudad o un nombre genérico), "
-            "responde 'VEREDICTO: NO VERIFICADO' y explica brevemente que no hay información "
-            "relevante para confirmar o desmentir el mensaje.\n\n"
+            "tu PRIMERA palabra DEBE ser 'VEREDICTO:' seguida de 'NO VERIFICADO'.\n\n"
+            "EJEMPLOS:\n"
+            "---\n"
+            "Mensaje viral: \"El 5G propaga el coronavirus.\"\n"
+            "Artículo: Expertos de la OMS desmienten el bulo de que el 5G tenga relación con el "
+            "coronavirus. La tecnología 5G no transmite enfermedades.\n"
+            "VEREDICTO: FALSO — El artículo desmiente directamente el bulo: la OMS confirma que "
+            "el 5G no tiene ninguna relación con el coronavirus.\n\n"
+            "---\n"
+            "Mensaje viral: \"El cohete Artemis II ha llegado a la Luna con éxito.\"\n"
+            "Artículo: La NASA confirma que la misión Artemis II ha completado con éxito su "
+            "trayectoria lunar tripulada.\n"
+            "VEREDICTO: VERDADERO — El artículo confirma explícitamente que la misión Artemis II "
+            "completó su trayectoria lunar.\n\n"
+            "---\n"
+            "Mensaje viral: \"El virus del Ébola se está extendiendo por Europa en 2024.\"\n"
+            "Artículo: El Real Madrid ganó la Liga de Campeones por decimoquinta vez tras vencer "
+            "al Borussia Dortmund en la final de Wembley.\n"
+            "VEREDICTO: NO VERIFICADO — El artículo trata un tema completamente distinto (fútbol) "
+            "y no aporta ninguna información sobre el Ébola ni sobre brotes virales en Europa.\n"
+            "---\n\n"
             "VEREDICTO:"
         ),
     )
@@ -280,8 +374,15 @@ def _extract_verdict_from_llm_output(text: str) -> str | None:
     """
     Parse free-form LLM output and return a canonical verdict string.
     Returns "FAKE", "REAL", or "UNVERIFIED", or None if nothing matches.
-    Checks Spanish labels first (VEREDICTO:), then English (VERDICT:).
+
+    Priority:
+      Tier 1 (strict)  — VEREDICTO:/VERDICT: prefix patterns (always wins).
+      Tier 2 (NL ES)   — Spanish natural-language signals.
+      Tier 3 (NL EN)   — English natural-language signals.
+
+    Within Tier 2/3, UNVERIFIED beats FAKE (more conservative).
     """
+    # ── Tier 1: strict prefix patterns ────────────────────────────────────────
     if re.search(r"veredicto:\s*no[\s_-]verificado", text, re.IGNORECASE):
         return "UNVERIFIED"
     if re.search(r"veredicto:\s*falso\b", text, re.IGNORECASE):
@@ -294,10 +395,52 @@ def _extract_verdict_from_llm_output(text: str) -> str | None:
         return "FAKE"
     if re.search(r"verdict:\s*(true|real)", text, re.IGNORECASE):
         return "REAL"
+
+    # ── Tier 2: Spanish natural-language signals ───────────────────────────────
+    _t2_fake = any(p.search(text) for p in _FAKE_NL_PATTERNS)
+    _t2_real = any(p.search(text) for p in _REAL_NL_PATTERNS)
+    _t2_unverified = any(p.search(text) for p in _UNVERIFIED_NL_PATTERNS)
+
+    if _t2_unverified:
+        return "UNVERIFIED"
+    if _t2_fake:
+        return "FAKE"
+    if _t2_real:
+        return "REAL"
+
+    # ── Tier 3: English natural-language signals ───────────────────────────────
+    _t3_fake = any(p.search(text) for p in _FAKE_EN_PATTERNS)
+    _t3_real = any(p.search(text) for p in _REAL_EN_PATTERNS)
+    _t3_unverified = any(p.search(text) for p in _UNVERIFIED_EN_PATTERNS)
+
+    if _t3_unverified:
+        return "UNVERIFIED"
+    if _t3_fake:
+        return "FAKE"
+    if _t3_real:
+        return "REAL"
+
     return None
 
 
 # ── Private helpers ───────────────────────────────────────────────────────────
+
+def _topic_overlap_score(entities: list[str], article_text: str) -> float:
+    """Return the fraction of *entities* that appear as substrings in *article_text*.
+
+    Both sides are lowercased and accent-stripped before comparison so that
+    "Ébola" matches "ebola".  Returns 0.0 when *entities* is empty.
+    """
+    if not entities:
+        return 0.0
+
+    def _normalize(s: str) -> str:
+        return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii").lower()
+
+    norm_article = _normalize(article_text)
+    matches = sum(1 for e in entities if _normalize(e) in norm_article)
+    return matches / len(entities)
+
 
 async def _search_qdrant(entities: list[str]) -> list[dict]:
     """Hybrid vector search (dense + BM25 sparse, fused with RRF) against 'fact_checks'."""

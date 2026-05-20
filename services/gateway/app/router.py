@@ -14,6 +14,7 @@ from telegram import Bot
 
 from app.metrics import texts_received, images_received, messages_rejected
 from app.rate_limiter import check_rate_limit
+from shared.rabbitmq_utils import build_amqp_url, mask_amqp_url
 
 logger = logging.getLogger(__name__)
 
@@ -39,14 +40,15 @@ async def _send_interim_message(chat_id: int, text: str) -> None:
 
 # Lazy singleton connection
 _connection: aio_pika.abc.AbstractRobustConnection | None = None
+_amqp_url_logged = False
 
 
 async def _get_channel() -> aio_pika.abc.AbstractChannel:
-    global _connection
-    url = (
-        f"amqp://{os.environ['RABBITMQ_USER']}:{os.environ['RABBITMQ_PASS']}"
-        f"@{os.environ['RABBITMQ_HOST']}:{os.environ['RABBITMQ_PORT']}/"
-    )
+    global _connection, _amqp_url_logged
+    url = build_amqp_url()
+    if not _amqp_url_logged:
+        logger.info("gateway: AMQP target = %s", mask_amqp_url(url))
+        _amqp_url_logged = True
     if _connection is None or _connection.is_closed:
         _connection = await aio_pika.connect_robust(url)
     channel = await _connection.channel()
