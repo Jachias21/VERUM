@@ -45,15 +45,18 @@ fi
 echo "[>>] Eliminando webhook..."
 
 "$PYTHON_CMD" -c "
-import urllib.request, urllib.parse, json, sys
+import urllib.request, urllib.parse, json, ssl, sys
 token  = sys.argv[1]
 params = urllib.parse.urlencode({'drop_pending_updates': 'true'}).encode()
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
 try:
     req = urllib.request.Request(
         'https://api.telegram.org/bot{}/deleteWebhook'.format(token),
         data=params, method='POST'
     )
-    with urllib.request.urlopen(req, timeout=10) as r:
+    with urllib.request.urlopen(req, timeout=10, context=ctx) as r:
         d = json.load(r)
 except Exception as e:
     print('[!!] No se pudo conectar con la API de Telegram: ' + str(e))

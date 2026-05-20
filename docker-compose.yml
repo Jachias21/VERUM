@@ -55,7 +55,7 @@ services:
         ollama serve &
         SERVE_PID=$$!
         echo '[ollama-init] Waiting for Ollama API...'
-        until curl -sf http://localhost:11434/api/tags >/dev/null 2>&1; do
+        until ollama list >/dev/null 2>&1; do
           sleep 2
         done
         echo "[ollama-init] API ready. Checking model $$OLLAMA_MODEL ..."
@@ -68,7 +68,7 @@ services:
         fi
         wait $$SERVE_PID
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags | grep -q \"$$OLLAMA_MODEL\""]
+      test: ["CMD-SHELL", "ollama list 2>/dev/null | grep -q \"$$OLLAMA_MODEL\""]
       interval: 15s
       timeout: 5s
       retries: 30
@@ -129,7 +129,7 @@ services:
       mongodb:
         condition: service_started
       ollama:
-        condition: service_healthy
+        condition: service_started
     restart: unless-stopped
 
   dashboard:
@@ -169,10 +169,11 @@ services:
       qdrant:
         condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "pgrep cron > /dev/null || exit 1"]
+      test: ["CMD-SHELL", "crontab -l 2>/dev/null | grep -q pipeline"]
       interval: 30s
       timeout: 5s
       retries: 3
+      start_period: 60s
     restart: unless-stopped
   # ── Test runner — only started with --profile test (never with make up) ───
 

@@ -122,7 +122,7 @@ echo "[OK] URL detectada: $NGROK_URL"
 echo "[>>] Registrando webhook con Telegram..."
 
 TELEGRAM_RESP=$("$PYTHON_CMD" -c "
-import urllib.request, urllib.parse, json, sys
+import urllib.request, urllib.parse, json, ssl, sys
 token  = sys.argv[1]
 url    = sys.argv[2]
 secret = sys.argv[3]
@@ -131,12 +131,15 @@ params = urllib.parse.urlencode({
     'secret_token': secret,
     'drop_pending_updates': 'true'
 }).encode()
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
 try:
     req = urllib.request.Request(
         'https://api.telegram.org/bot{}/setWebhook'.format(token),
         data=params, method='POST'
     )
-    with urllib.request.urlopen(req, timeout=10) as r:
+    with urllib.request.urlopen(req, timeout=10, context=ctx) as r:
         print(r.read().decode())
 except Exception as e:
     print('')

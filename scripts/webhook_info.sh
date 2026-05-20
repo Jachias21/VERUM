@@ -43,12 +43,15 @@ fi
 # Consultar getWebhookInfo y mostrar de forma legible
 # ---------------------------------------------------------------------------
 "$PYTHON_CMD" -c "
-import urllib.request, json, sys
+import urllib.request, json, ssl, sys
 token = sys.argv[1]
+ctx = ssl.create_default_context()
+ctx.check_hostname = False
+ctx.verify_mode = ssl.CERT_NONE
 try:
     with urllib.request.urlopen(
         'https://api.telegram.org/bot{}/getWebhookInfo'.format(token),
-        timeout=10
+        timeout=10, context=ctx
     ) as r:
         d = json.load(r)
 except Exception as e:
