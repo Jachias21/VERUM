@@ -184,9 +184,11 @@ services:
     container_name: verum_test_runner
     profiles:
       - test
+    env_file: .env
     volumes:
       - ./tests:/app/tests:ro
       - ./shared:/app/shared:ro
+      - ./reports:/app/reports
     working_dir: /app
 
 volumes:

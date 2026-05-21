@@ -422,12 +422,15 @@ async def test_pipeline_l2_topic_mismatch_drops_source():
     )
     message = FakeMessage(task)
 
-    # L1 returns nothing; L2 Google FC returns a football article (zero entity overlap)
+    # L1 returns nothing; L2 Google FC returns a football article (zero entity overlap).
+    # NOTE: the article must NOT contain any of the test entities ("Ébola", "Europa",
+    # "virus") otherwise _topic_overlap_score would be > 0.25 and the hit would NOT
+    # be filtered.  Removing "Copa de Europa" avoids the accidental "Europa" match.
     off_topic_hit = [
         {
             "score": 0.60,
             "verdict": "UNVERIFIED",
-            "text": "El Real Madrid ganó la Copa de Europa por decimoquinta vez en Wembley.",
+            "text": "El Real Madrid ganó la decimoquinta Copa en Wembley.",
             "url": "https://marca.com/futbol/real-madrid/copa-europa",
         }
     ]

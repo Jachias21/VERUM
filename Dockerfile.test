@@ -45,6 +45,7 @@ COPY services/ /app/services/
 COPY shared/   /app/shared/
 COPY models/   /app/models/
 COPY tests/    /app/tests/
+COPY scripts/  /app/scripts/
 COPY pytest.ini /app/pytest.ini
 
 # WORKDIR en la raiz del proyecto garantiza que los imports

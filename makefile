@@ -44,6 +44,7 @@ export RABBITMQ_USER RABBITMQ_PASS MONGO_USER MONGO_PASS MONGO_DB
         ollama-pull ollama-list \
         nlp-test etl-run \
         test-build test test-nlp test-etl test-gateway test-integration \
+        eval-nlp \
         webhook webhook-info webhook-delete
 
 # =============================================================================
@@ -74,6 +75,7 @@ help:
 	@echo "  make test-gateway   Tests del gateway/router"
 	@echo "  make test-integration  Tests de integracion end-to-end"
 	@echo "  make test-build     Solo construye la imagen de tests (sin ejecutar)"
+	@echo "  make eval-nlp       Evaluacion cuantitativa NLP contra gold set (60 ejemplos)"
 	@echo ""
 	@echo "--- Logs ------------------------------------"
 	@echo "  make logs           Todos los servicios (tiempo real)"
@@ -463,4 +465,19 @@ test-integration: test-build
 	@echo ""
 	@docker compose -p $(PROJECT_NAME) -f $(COMPOSE_FILE) --profile test run --rm $(TEST_SERVICE) \
 	  pytest tests/test_integration/ -v --tb=short --color=yes
+	@echo ""
+
+## Ejecuta evaluacion cuantitativa del modulo NLP contra el gold set
+## Genera reports/eval_summary.json y reports/eval_report.html
+eval-nlp: test-build
+	@echo ""
+	@echo "[>>] Ejecutando evaluacion NLP contra gold set (60 ejemplos)..."
+	@echo "     Requisitos: make up && make health (Qdrant + Ollama deben estar activos)"
+	@echo ""
+	@mkdir -p reports
+	@docker compose -p $(PROJECT_NAME) -f $(COMPOSE_FILE) --profile test run --rm $(TEST_SERVICE) \
+	  python /app/scripts/eval_nlp.py --gold /app/tests/golden/gold_nlp.jsonl --out /app/reports/
+	@echo ""
+	@echo "[OK] Evaluacion completada."
+	@echo "     Ver reports/eval_report.html en el navegador."
 	@echo ""

@@ -172,7 +172,9 @@ async def test_hybrid_search_google_fallback():
     SparseEmbedding = fastembed.SparseEmbedding
 
     low_score_hit = [{"score": 0.30, "url": "https://qdrant.example.com", "verdict": "UNVERIFIED", "text": ""}]
-    google_hits = [{"score": 1.0, "url": "https://factcheck.google.com/claim/1", "verdict": "FAKE", "text": "Noticia de prueba para test — artículo verificado sobre Madrid."}]
+    # text must contain "Madrid" so that _topic_overlap_score(["Madrid"], text) >= 0.25
+    # (otherwise the L2 hit is filtered and verdict becomes UNVERIFIED).
+    google_hits = [{"score": 1.0, "url": "https://factcheck.google.com/claim/1", "verdict": "FAKE", "text": "Fact checked article text about Madrid."}]
 
     fake_dense = [0.1] * 1024
     fake_sparse = SparseEmbedding(
@@ -193,7 +195,7 @@ async def test_hybrid_search_google_fallback():
 
     assert result.verdict == "FAKE"
     assert result.source_url == "https://factcheck.google.com/claim/1"
-    assert result.retrieved_context == "Fact checked article text."
+    assert "Fact checked article text" in result.retrieved_context
 
 
 # ── Test 12: hybrid_search early exit — text too short and no entities ────────
