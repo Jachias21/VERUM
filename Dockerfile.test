@@ -31,8 +31,8 @@ RUN pip install --no-cache-dir \
       -r /tmp/req_gateway.txt \
       -r /tmp/req_etl.txt
 
-# -- Herramientas de testing --------------------------------------------------
-RUN pip install --no-cache-dir pytest pytest-asyncio
+# -- Herramientas de testing y evaluacion ------------------------------------
+RUN pip install --no-cache-dir pytest pytest-asyncio scikit-learn matplotlib
 
 # -- Modelos SpaCy ------------------------------------------------------------
 RUN python -m spacy download es_core_news_lg && \
