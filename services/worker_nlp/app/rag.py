@@ -448,6 +448,7 @@ async def _search_qdrant(entities: list[str]) -> list[dict]:
         return []
 
     query_text = " ".join(entities)
+    logger.info("[rag] Qdrant query_text: %r (n_entities=%d)", query_text, len(entities))
 
     # Both embeddings are CPU-bound; run together in a thread pool
     loop = asyncio.get_event_loop()
@@ -497,6 +498,10 @@ async def _search_qdrant(entities: list[str]) -> list[dict]:
         logger.error("[rag] Qdrant unreachable after %d retries: %s", _MAX_RETRIES, last_exc)
         return []
 
+    logger.info(
+        "[rag] Qdrant raw scores: %s",
+        [round(getattr(h, "score", 0.0), 4) for h in hits],
+    )
     results = []
     for hit in hits:
         payload = hit.payload or {}
@@ -538,9 +543,18 @@ async def _search_google_fact_check(query: str, lang: str = "es") -> list[dict]:
     without languageCode to capture fact-checks in any language.
     Results are cached in memory for 5 minutes to avoid redundant API calls.
     """
-    cache_key = query.strip().lower()
+    # Sanitise query before sending to Google FC
+    query_clean = re.sub(r"\s+", " ", query).strip()
+    if not query_clean:
+        logger.warning("[rag] Google FC: empty query after sanitisation — skipping")
+        return []
+    if len(query_clean) > 150:
+        query_clean = query_clean[:150].rsplit(" ", 1)[0]
+    logger.info("[rag] Google FC query: %r", query_clean)
+
+    cache_key = query_clean.lower()
     if cache_key in _google_fc_cache:
-        logger.info("[rag] Google FC: cache hit for query=%.60r", query)
+        logger.info("[rag] Google FC: cache hit for query=%.60r", query_clean)
         return _google_fc_cache[cache_key]
 
     api_key = os.getenv("GOOGLE_FACT_CHECK_API_KEY", "")
@@ -552,7 +566,7 @@ async def _search_google_fact_check(query: str, lang: str = "es") -> list[dict]:
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
-                url, params={"query": query, "key": api_key, "languageCode": lang}
+                url, params={"query": query_clean, "key": api_key, "languageCode": lang}
             )
             if resp.status_code != 200:
                 logger.warning("[rag] Google FC API returned HTTP %d", resp.status_code)
@@ -560,16 +574,16 @@ async def _search_google_fact_check(query: str, lang: str = "es") -> list[dict]:
             claims = resp.json().get("claims", [])
             if claims:
                 result = _parse_google_claims(claims)
-                logger.info("[rag] Google FC returned %d claims for query=%.60r", len(result), query)
+                logger.info("[rag] Google FC returned %d claims for query=%.60r", len(result), query_clean)
                 _google_fc_cache[cache_key] = result
                 return result
             # Retry without languageCode for broader coverage
-            resp2 = await client.get(url, params={"query": query, "key": api_key})
+            resp2 = await client.get(url, params={"query": query_clean, "key": api_key})
             if resp2.status_code != 200:
                 logger.warning("[rag] Google FC API (retry) returned HTTP %d", resp2.status_code)
                 return []
             result = _parse_google_claims(resp2.json().get("claims", []))
-            logger.info("[rag] Google FC (retry, no lang) returned %d claims for query=%.60r", len(result), query)
+            logger.info("[rag] Google FC (retry, no lang) returned %d claims for query=%.60r", len(result), query_clean)
             _google_fc_cache[cache_key] = result
             return result
     except Exception as exc:
@@ -588,11 +602,19 @@ async def _search_gnews(query: str, lang: str = "es") -> list[dict]:
         return []
     logger.info("[rag] GNews API: key_present=True, querying...")
     url = "https://gnews.io/api/v4/search"
+    # Sanitise query before sending to GNews
+    query_clean = re.sub(r"\s+", " ", query).strip()
+    if not query_clean:
+        logger.warning("[rag] GNews: empty query after sanitisation — skipping")
+        return []
+    if len(query_clean) > 150:
+        query_clean = query_clean[:150].rsplit(" ", 1)[0]
+    logger.info("[rag] GNews query: %r", query_clean)
     try:
         async with httpx.AsyncClient(timeout=8) as client:
             resp = await client.get(
                 url,
-                params={"q": query, "lang": lang, "token": api_key, "max": 5},
+                params={"q": query_clean, "lang": lang, "token": api_key, "max": 5},
             )
             resp.raise_for_status()
             articles = resp.json().get("articles", [])
@@ -634,25 +656,59 @@ def _normalise_rating(rating: str) -> str:
     return "UNVERIFIED"
 
 
+_LEADING_ARTICLES = (
+    "la", "el", "los", "las", "un", "una", "unos", "unas",
+    "the", "a", "an",
+)
+
+
+def _normalize_for_dedup(s: str) -> str:
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"\s+", " ", s.lower()).strip()
+
+
 def _build_l2_query(entities: list[str], fallback_text: str) -> str:
     """Build a concise, clean search query for L2 APIs from extracted entities.
 
-    Filters out long/noisy noun phrases (> 4 words or > 40 characters) that
-    tend to break keyword-based search APIs, and limits the result to the top
-    5 remaining entities.  Falls back to the first 100 characters of the
+    Filters empty/whitespace entities, entities beginning with a leading article,
+    and long/noisy noun phrases (> 4 words or > 40 characters).  Deduplicates
+    semantically (substring containment on normalised forms) and limits the
+    result to 3 entities.  Falls back to the first 100 characters of the
     original text when no suitable entities are available.
     """
     if not entities:
-        return fallback_text[:100]
+        return re.sub(r"\s+", " ", fallback_text[:100]).strip()
 
-    # Keep only short, clean tokens: ≤ 4 words and ≤ 40 characters
-    clean = [e for e in entities if len(e) <= 40 and len(e.split()) <= 4]
+    # 1. Drop empty / whitespace-only entities
+    filtered = [e for e in entities if e.strip()]
 
-    # If the filter removed everything, fall back to the original list but
-    # still cap length so the query is not enormous.
-    if not clean:
-        clean = [e[:40] for e in entities]
+    # 2. Drop entities whose first word is a leading article
+    filtered = [
+        e for e in filtered
+        if e.strip().split()[0].lower() not in _LEADING_ARTICLES
+    ]
 
-    # Take at most 5 most prominent entities (NER returns them in order of appearance)
-    selected = clean[:5]
-    return " ".join(selected)
+    # 3. Keep only short, clean tokens: ≤ 4 words and ≤ 40 characters
+    filtered = [e for e in filtered if len(e) <= 40 and len(e.split()) <= 4]
+
+    # 4. Semantic deduplication: if norm(a) is a substring of norm(b), keep only b
+    norms = [_normalize_for_dedup(e) for e in filtered]
+    keep = [True] * len(filtered)
+    for i in range(len(filtered)):
+        for j in range(len(filtered)):
+            if i == j or not keep[i]:
+                continue
+            # If norm[i] is contained in norm[j], i is the shorter/subset — drop it
+            if norms[i] in norms[j] and norms[i] != norms[j]:
+                keep[i] = False
+    deduped = [e for e, k in zip(filtered, keep) if k]
+
+    # 5. If all filters removed everything, fall back to original text
+    if not deduped:
+        return re.sub(r"\s+", " ", fallback_text[:100]).strip()
+
+    # 6. Limit to 3 most prominent entities
+    selected = deduped[:3]
+
+    # 7. Collapse any double spaces in the final string
+    return re.sub(r"\s+", " ", " ".join(selected)).strip()
