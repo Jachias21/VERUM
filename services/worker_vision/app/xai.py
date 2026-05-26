@@ -206,7 +206,7 @@ def _write_blank_png(path: Path) -> None:
 # Public API
 # ---------------------------------------------------------------------------
 
-async def generate_heatmap(image_bytes: bytes, query_id: uuid.UUID) -> str:
+async def generate_heatmap(image_bytes: bytes, query_id: uuid.UUID) -> str | None:
     """
     Apply Grad-CAM++ on the spatial branch of TwoStreamCNN and overlay the
     activation map on the original RGB image.

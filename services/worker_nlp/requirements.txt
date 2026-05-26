@@ -5,6 +5,7 @@ python-dotenv
 
 # NLP / NER
 spacy
+langdetect
 
 # RAG orchestration
 langchain
@@ -21,6 +22,10 @@ langchain-ollama
 
 # External fact-check APIs
 httpx
+cachetools
 
 # Telegram bot
 python-telegram-bot
+
+# Observability
+prometheus-client

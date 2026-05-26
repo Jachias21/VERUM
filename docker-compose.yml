@@ -47,6 +47,32 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
+    environment:
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        ollama serve &
+        SERVE_PID=$$!
+        echo '[ollama-init] Waiting for Ollama API...'
+        until ollama list >/dev/null 2>&1; do
+          sleep 2
+        done
+        echo "[ollama-init] API ready. Checking model $$OLLAMA_MODEL ..."
+        if ! ollama list 2>/dev/null | grep -q "$$OLLAMA_MODEL"; then
+          echo "[ollama-init] Pulling $$OLLAMA_MODEL (first boot) ..."
+          ollama pull "$$OLLAMA_MODEL"
+          echo '[ollama-init] Pull complete.'
+        else
+          echo "[ollama-init] Model $$OLLAMA_MODEL already present."
+        fi
+        wait $$SERVE_PID
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list 2>/dev/null | grep -q \"$$OLLAMA_MODEL\""]
+      interval: 15s
+      timeout: 5s
+      retries: 30
+      start_period: 180s
     # AMD ROCm GPU — uncomment on home-lab
     # devices:
     #   - /dev/kfd
@@ -89,6 +115,8 @@ services:
       context: .
       dockerfile: services/worker_nlp/Dockerfile
     container_name: verum_worker_nlp
+    ports:
+      - "9101:9101"   # Prometheus metrics → http://localhost:9101/metrics
     env_file: .env
     environment:
       PYTHONUNBUFFERED: "1"
@@ -126,6 +154,42 @@ services:
       - qdrant
     profiles:
       - etl   # docker compose --profile etl run etl
+  # etl_scheduler:  uncommented below — runs ETL on a cron schedule automatically
+  etl_scheduler:
+    build:
+      context: .
+      dockerfile: services/etl/Dockerfile
+    container_name: verum_etl_scheduler
+    env_file: .env
+    environment:
+      PYTHONUNBUFFERED: "1"
+      ETL_SCHEDULE: ${ETL_SCHEDULE:-0 */12 * * *}
+    entrypoint: ["/bin/sh", "/app/cron/entrypoint.sh"]
+    depends_on:
+      qdrant:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "crontab -l 2>/dev/null | grep -q pipeline"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+  # ── Test runner — only started with --profile test (never with make up) ───
+
+  test_runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    container_name: verum_test_runner
+    profiles:
+      - test
+    env_file: .env
+    volumes:
+      - ./tests:/app/tests:ro
+      - ./shared:/app/shared:ro
+      - ./reports:/app/reports
+    working_dir: /app
 
 volumes:
   rabbitmq_data:

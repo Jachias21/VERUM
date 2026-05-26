@@ -13,6 +13,7 @@ Run modes:
 """
 from __future__ import annotations
 
+import logging
 import os
 import socket
 import ssl
@@ -33,6 +34,10 @@ from qdrant_client.models import (
 )
 
 load_dotenv()
+
+logger = logging.getLogger("verum.etl")
+
+from .seed_classics import CLASSIC_HOAXES  # noqa: E402
 
 # Fact-checking RSS sources (extend freely)
 RSS_FEEDS = [
@@ -236,12 +241,21 @@ def extract() -> list[dict]:
 BATCH_SIZE = 10  # max articles per embedding + upsert cycle to avoid OOM
 
 
-def _ensure_collection(client: QdrantClient, collection: str) -> None:
-    """Drop-and-recreate the Qdrant collection so the schema is always current."""
+def _ensure_collection_schema(client: QdrantClient, collection: str, force_recreate: bool = False) -> None:
+    """Ensure the Qdrant collection exists with the correct hybrid schema.
+
+    By default uses incremental upsert mode: if the collection already exists
+    it is left untouched so the bot keeps serving requests during ETL runs.
+    Pass force_recreate=True only for schema migrations.
+    """
     existing = [c.name for c in client.get_collections().collections]
     if collection in existing:
-        print(f"[etl] Dropping existing collection '{collection}'…")
-        client.delete_collection(collection)
+        if force_recreate:
+            print(f"[etl] force_recreate=True — dropping existing collection '{collection}'…")
+            client.delete_collection(collection)
+        else:
+            print(f"[etl] Collection already exists, using upsert mode")
+            return
     print(f"[etl] Creating hybrid collection '{collection}' (dense + sparse)…")
     client.create_collection(
         collection_name=collection,
@@ -310,15 +324,15 @@ def transform(articles: list[dict]) -> list[PointStruct]:
 
 
 def load(points: list[PointStruct]) -> None:
-    """Recreate collection with hybrid schema and upsert all points."""
+    """Ensure collection schema and upsert all points (incremental by default)."""
     client = QdrantClient(
         host=os.getenv("QDRANT_HOST", "localhost"),
         port=int(os.getenv("QDRANT_PORT", 6333)),
     )
     collection = os.getenv("QDRANT_COLLECTION", "fact_checks")
-    _ensure_collection(client, collection)
+    _ensure_collection_schema(client, collection)
     client.upsert(collection_name=collection, points=points)
-    print(f"[etl] Upserted {len(points)} hybrid points into '{collection}'.")
+    print(f"[etl] Upserted {len(points)} points into '{collection}' (incremental mode).")
 
 
 def run() -> None:
@@ -329,13 +343,39 @@ def run() -> None:
     articles = extract()
     print(f"[etl] Extracted {len(articles)} articles (valid).")
 
-    # ── Setup Qdrant (collection recreated once, before any upserts) ────────
+    # ── Setup Qdrant (collection created only if absent; upsert mode otherwise) ─
     client = QdrantClient(
         host=os.getenv("QDRANT_HOST", "localhost"),
         port=int(os.getenv("QDRANT_PORT", 6333)),
     )
     collection = os.getenv("QDRANT_COLLECTION", "fact_checks")
-    _ensure_collection(client, collection)
+    _ensure_collection_schema(client, collection)
+
+    # ── Seed classic hoaxes if requested or collection is nearly empty ────────
+    _seed_flag = os.getenv("SEED_CLASSICS", "true").strip().lower()
+    _should_seed = _seed_flag in ("1", "true", "yes")
+    if not _should_seed:
+        try:
+            _point_count = client.count(collection_name=collection).count
+            _should_seed = _point_count < 5
+        except Exception:
+            _should_seed = False
+    if _should_seed:
+        logger.info("[etl] Seeding %d classic hoaxes into Qdrant", len(CLASSIC_HOAXES))
+        print(f"[etl] Seeding {len(CLASSIC_HOAXES)} classic hoaxes into Qdrant…")
+        seed_articles = [
+            {
+                "id": str(uuid.uuid5(uuid.NAMESPACE_URL, h["url"])),
+                "title": h["title"],
+                "summary": h["content_summary"],
+                "url": h["url"],
+                "publisher": h["source_publisher"],
+                "published": h["publish_date"],
+                "verdict": h["verdict"],
+            }
+            for h in CLASSIC_HOAXES
+        ]
+        articles = seed_articles + articles
 
     # ── Load models once — kept alive across batches ────────────────────────
     print("[etl] Loading dense model (multilingual-e5-large, ONNX)…")
@@ -367,7 +407,7 @@ def run() -> None:
     del dense_model, sparse_model
     gc.collect()
 
-    print(f"[etl] Upserted {total_upserted} hybrid points into '{collection}'.")
+    print(f"[etl] Upserted {total_upserted} points into '{collection}' (incremental mode).")
 
     # ── Publisher summary (top 10) ────────────────────────────────────────
     from collections import Counter

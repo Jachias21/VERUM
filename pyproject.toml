@@ -53,4 +53,5 @@ nlp = [
 ]
 dev = [
     "pytest",
+    "pytest-asyncio",
 ]
