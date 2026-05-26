@@ -77,13 +77,56 @@ RSS_FEEDS = [
     "https://www.rtve.es/api/noticias.rss",
     "https://www.infobae.com/feeds/rss/",
     "https://www.clarin.com/rss/lo-ultimo/",
+    # ── Official institutional sources (Spain) ─────────────────────
+    "https://www.lamoncloa.gob.es/serviciosdeprensa/notasprensa/Paginas/index.aspx?format=rss",
+    "https://www.boe.es/rss/canal.php?c=ultimas_disposiciones",
+    "https://www.ine.es/dyngs/INEbase/listaoperaciones.htm?rss=1",
+    "https://www.sanidad.gob.es/rss/notasPrensa.do",
+    "https://www.educacionyfp.gob.es/prensa/actualidad.rss",
+    "https://www.exteriores.gob.es/es/_layouts/15/listfeed.aspx?List=%7BB2DDA00C-A4B0-4A33-B348-6AE74B43BC85%7D",
+    # ── Official institutional sources (international) ─────────────
+    "https://www.un.org/feed/subscribe/en/rss/category/un-news/feed",
+    "https://www.who.int/rss-feeds/news-english.xml",
+    "https://www.esa.int/rssfeed/Our_Activities",
+    "https://www.ecb.europa.eu/rss/press.html",
+    "https://ec.europa.eu/commission/presscorner/api/rss?language=es",
+    # ── General news agencies (broad factual coverage) ────────────
+    "https://www.efe.com/efe/espana/1/rss",
+    "https://feeds.reuters.com/reuters/worldNews",
+    "https://feeds.bbci.co.uk/news/world/rss.xml",
+    "https://apnews.com/index.rss",
+    "https://www.dw.com/es/top-stories/s-30684/rss",
+    # ── Science & health (peer-reviewed coverage) ─────────────────
+    "https://www.nature.com/nature.rss",
+    "https://www.sciencemag.org/rss/current.xml",
+    "https://www.nih.gov/news-events/news-releases/feed",
+    "https://www.cdc.gov/media/rss/index.htm",
+    # ── Economy (institutional and quality general) ───────────────
+    "https://www.bde.es/rss/notas_es.xml",
+    "https://cincodias.elpais.com/rss/cincodias/portada.xml",
+    "https://www.expansion.com/rss/portada.xml",
 ]
 
-# Publishers that exclusively publish fact-checks / debunks → default verdict FAKE
+# Publishers that exclusively publish fact-checks / debunks.
+# Articles from these sources without explicit REAL/FAKE keywords default to UNVERIFIED
+# (they cover misinformation context but may not always emit a verdict).
 _FACTCHECKER_PUBLISHERS = [
-    "maldita", "newtral", "verificat", "afp factual", "fact check", "reuters",
+    "maldita", "newtral", "verificat", "afp factual", "fact check",
     "snopes", "fullfact", "factcheck", "politifact", "chequeado", "colombiacheck",
-    "factchequeado", "stopfake", "euvsdisinfo", "hechosdehoy",
+    "factchequeado", "stopfake", "euvsdisinfo", "hechosdehoy", "aosfatos",
+    "ecuadorchequea",
+]
+
+# Publishers that publish factual information from institutional/official sources.
+# Articles from these sources without explicit FAKE keywords default to REAL,
+# because their editorial mandate is to report verified facts, not to debunk.
+_INSTITUTIONAL_PUBLISHERS = [
+    "boe", "moncloa", "ine", "sanidad", "educacion", "exteriores",
+    "un.org", "naciones unidas", "who", "oms", "esa", "european space agency",
+    "bce", "ecb", "european central bank", "ec.europa", "comisión europea",
+    "efe", "reuters", "bbc", "ap news", "associated press", "dw ",
+    "nature", "science magazine", "nih", "cdc",
+    "banco de españa", "bde",
 ]
 
 # Dense vector dimension for BAAI/bge-m3
@@ -101,22 +144,44 @@ _REAL_KEYWORDS = [
 
 
 def _infer_verdict_from_entry(entry: dict, publisher: str = "") -> str:
-    """Best-effort verdict using title, tags, and summary text before storing in Qdrant."""
+    """Best-effort verdict using title, tags, summary text, and publisher class.
+
+    Decision flow:
+      1. Lexical signals dominate: explicit FAKE/REAL keywords in text always win.
+      2. If both kinds of signals appear → UNVERIFIED (ambiguous).
+      3. Without explicit signals, fall back to publisher class:
+         - fact-checkers → UNVERIFIED (their work isn't always a debunk;
+           it may be context or analysis without a verdict).
+         - institutional publishers → REAL (their editorial mandate is
+           to publish verified facts).
+         - everything else → UNVERIFIED (safe default).
+
+    This mirrors how a human would read a headline: the same words in
+    El País and Maldita carry different a-priori meanings.
+    """
     tags = " ".join(t.get("term", "") for t in entry.get("tags", [])).lower()
     title = entry.get("title", "").lower()
     raw_summary = entry.get("summary", "")
     clean_summary = BeautifulSoup(raw_summary, "html.parser").get_text(separator=" ", strip=True).lower()
     combined = " ".join([tags, title, clean_summary])
 
-    if any(w in combined for w in _FAKE_KEYWORDS):
+    has_fake = any(w in combined for w in _FAKE_KEYWORDS)
+    has_real = any(w in combined for w in _REAL_KEYWORDS)
+
+    # Both signals present → ambiguous, do not commit to either verdict
+    if has_fake and has_real:
+        return "UNVERIFIED"
+    if has_fake:
         return "FAKE"
-    if any(w in combined for w in _REAL_KEYWORDS):
+    if has_real:
         return "REAL"
 
-    # Heuristic: known fact-checker publishers only publish debunks → default FAKE
+    # No explicit signals → use publisher class
     pub_lower = publisher.lower()
     if any(fc in pub_lower for fc in _FACTCHECKER_PUBLISHERS):
-        return "FAKE"
+        return "UNVERIFIED"
+    if any(inst in pub_lower for inst in _INSTITUTIONAL_PUBLISHERS):
+        return "REAL"
 
     return "UNVERIFIED"
 
