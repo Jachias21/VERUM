@@ -44,6 +44,15 @@ from architecture import TwoStreamCNN
 from preprocess import batch_to_freq_tensors
 from train import get_transforms
 
+# ---------------------------------------------------------------------------
+# MLflow — opcional; solo logueamos si hay un run activo
+# ---------------------------------------------------------------------------
+try:
+    import mlflow
+    _mlflow_available = True
+except ImportError:
+    _mlflow_available = False
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -235,6 +244,16 @@ def _export_onnx(model: TwoStreamCNN, checkpoint: Path, device: torch.device) ->
         "  para que el worker_vision lo cargue en tiempo de ejecución.\n"
         f"    cp {onnx_path} services/worker_vision/weights/verum_cnn.onnx"
     )
+
+    # Loguear el ONNX como artefacto MLflow si hay un run activo
+    if _mlflow_available:
+        try:
+            active_run = mlflow.active_run()
+            if active_run:
+                mlflow.log_artifact(str(onnx_path))
+                print(f"[evaluate] MLflow: ONNX registrado como artefacto en run {active_run.info.run_id[:8]}…")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[evaluate] Advertencia MLflow: {exc}")
 
 
 # ---------------------------------------------------------------------------

@@ -10,6 +10,7 @@ Dataset expected layout:
 
 Usage:
   python models/vision/train.py --epochs 10 --batch-size 32
+  python models/vision/train.py --epochs 10 --mlflow-uri ./mlruns
 """
 import argparse
 from pathlib import Path
@@ -22,6 +23,16 @@ from torchvision import datasets, transforms
 
 from architecture import TwoStreamCNN
 from preprocess import batch_to_freq_tensors
+
+# ---------------------------------------------------------------------------
+# MLflow — opcional; el script funciona sin él
+# ---------------------------------------------------------------------------
+try:
+    import mlflow
+    import mlflow.pytorch
+    _mlflow_available = True
+except ImportError:
+    _mlflow_available = False
 
 
 def _jpeg_compress_wrapper(img):
@@ -63,9 +74,33 @@ def get_device() -> torch.device:
     return torch.device("cpu")
 
 
-def train(epochs: int, batch_size: int, lr: float, data_root: Path, output_dir: Path):
+def train(
+    epochs: int,
+    batch_size: int,
+    lr: float,
+    data_root: Path,
+    output_dir: Path,
+    mlflow_uri: str = "./mlruns",
+):
     device = get_device()
     print(f"[train] Usando dispositivo: {device}")
+
+    # ── MLflow run ───────────────────────────────────────────────────────────
+    _mlflow_enabled = _mlflow_available
+    if _mlflow_enabled:
+        mlflow.set_tracking_uri(mlflow_uri)
+        mlflow.set_experiment("VERUM-TwoStreamCNN")
+        mlflow.start_run()
+        mlflow.log_params({
+            "epochs":        epochs,
+            "batch_size":    batch_size,
+            "lr":            lr,
+            "arquitectura":  "TwoStreamCNN-EfficientNetB0",
+            "dataset":       "CIFAKE",
+        })
+        print(f"[train] MLflow tracking activado → {mlflow_uri}")
+    else:
+        print("[train] mlflow no instalado — tracking desactivado.")
 
     model = TwoStreamCNN(pretrained=True).to(device)
 
@@ -148,24 +183,58 @@ def train(epochs: int, batch_size: int, lr: float, data_root: Path, output_dir: 
             f"val_acc: {val_acc:.4f}"
         )
 
+        # ── MLflow métricas por epoch ─────────────────────────────────────────
+        if _mlflow_enabled:
+            mlflow.log_metrics(
+                {
+                    "train_loss": avg_loss,
+                    "train_acc":  train_acc,
+                    "val_acc":    val_acc,
+                },
+                step=epoch,
+            )
+
         # Guardar el mejor modelo
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             output_dir.mkdir(parents=True, exist_ok=True)
-            torch.save(model.state_dict(), output_dir / "verum_cnn_best.pt")
+            best_pt = output_dir / "verum_cnn_best.pt"
+            torch.save(model.state_dict(), best_pt)
             print(f"  ✓ Mejor modelo guardado (val_acc: {val_acc:.4f})")
+            if _mlflow_enabled:
+                mlflow.log_artifact(str(best_pt))
 
     # Guardar checkpoint final
-    torch.save(model.state_dict(), output_dir / "verum_cnn_final.pt")
+    final_pt = output_dir / "verum_cnn_final.pt"
+    torch.save(model.state_dict(), final_pt)
     print(f"\n[train] Entrenamiento completado. Mejor val_acc: {best_val_acc:.4f}")
+
+    if _mlflow_enabled:
+        mlflow.log_artifact(str(final_pt))
+        mlflow.end_run()
+        print(f"[train] MLflow run cerrado. Resultados en: {mlflow_uri}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--epochs",     type=int,   default=10)
-    parser.add_argument("--batch-size", type=int,   default=32)
-    parser.add_argument("--lr",         type=float, default=1e-4)
-    parser.add_argument("--data-root",  type=Path,  default=Path("../../data/processed"))
-    parser.add_argument("--output-dir", type=Path,  default=Path("weights"))
+    parser.add_argument("--epochs",      type=int,   default=10)
+    parser.add_argument("--batch-size",  type=int,   default=32)
+    parser.add_argument("--lr",          type=float, default=1e-4)
+    parser.add_argument("--data-root",   type=Path,  default=Path("../../data/processed"))
+    parser.add_argument("--output-dir",  type=Path,  default=Path("weights"))
+    parser.add_argument(
+        "--mlflow-uri",
+        type=str,
+        default="./mlruns",
+        help="URI del servidor MLflow (default: ./mlruns local). "
+             "Ejemplo remoto: http://mlflow-server:5000",
+    )
     args = parser.parse_args()
-    train(args.epochs, args.batch_size, args.lr, args.data_root, args.output_dir)
+    train(
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        lr=args.lr,
+        data_root=args.data_root,
+        output_dir=args.output_dir,
+        mlflow_uri=args.mlflow_uri,
+    )
