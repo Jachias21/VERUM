@@ -108,20 +108,22 @@ export default function HowItWorks() {
   const sectionRef = useRef<HTMLDivElement>(null);
   const [activeStep, setActiveStep] = useState(0);
 
-  /* useScroll syncs activeStep with scroll position — desktop only */
-  const { scrollYProgress } = useScroll({
-    target: sectionRef,
-    offset: ["start center", "end center"],
-  });
+  /* useScroll tracks window scroll — progress calculated manually via ref */
+  const { scrollY } = useScroll();
 
   useEffect(() => {
-    return scrollYProgress.on("change", (v) => {
-      if (v < 0.25) setActiveStep(0);
-      else if (v < 0.5) setActiveStep(1);
-      else if (v < 0.75) setActiveStep(2);
+    return scrollY.on("change", () => {
+      if (!sectionRef.current) return;
+      const rect = sectionRef.current.getBoundingClientRect();
+      const sectionHeight = sectionRef.current.offsetHeight;
+      const scrolled = -rect.top;
+      const progress = scrolled / sectionHeight;
+      if (progress < 0.15) setActiveStep(0);
+      else if (progress < 0.35) setActiveStep(1);
+      else if (progress < 0.58) setActiveStep(2);
       else setActiveStep(3);
     });
-  }, [scrollYProgress]);
+  }, [scrollY]);
 
   const activeData = stepsData[activeStep];
 
@@ -134,8 +136,7 @@ export default function HowItWorks() {
         background: "#ffffff",
         paddingTop: "80px",
         paddingBottom: "80px",
-        /* Prevent horizontal overflow on narrow screens */
-        overflowX: "hidden",
+        /* NOTE: NO overflow here — any overflow value breaks position:sticky */
       }}
     >
       <div
@@ -339,14 +340,7 @@ export default function HowItWorks() {
             DESKTOP layout  (≥ 768 px)
             — Hidden on mobile, shown on md+
         ══════════════════════════════════════════════ */}
-        <div
-          className="hidden md:grid"
-          style={{
-            gridTemplateColumns: "1fr 1fr",
-            gap: "4rem",
-            alignItems: "start",
-          }}
-        >
+        <div className="hidden md:grid grid-cols-2 gap-16 items-start">
           {/* Left column — Steps */}
           <div>
             {stepsData.map((step, index) => {
@@ -429,16 +423,8 @@ export default function HowItWorks() {
           </div>
 
           {/* Right column — Sticky mascot + context card */}
-          <div
-            style={{
-              position: "sticky",
-              top: "120px",
-              height: "fit-content",
-              display: "flex",
-              flexDirection: "column",
-              gap: "24px",
-            }}
-          >
+          <div className="hidden md:block sticky top-[120px] h-fit">
+            <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
             {/* Mascot with AnimatePresence */}
             <div
               style={{
@@ -506,8 +492,9 @@ export default function HowItWorks() {
                 </div>
               </motion.div>
             </AnimatePresence>
-          </div>
-        </div>
+            </div>{/* end inner flex wrapper */}
+          </div>{/* end sticky column */}
+        </div>{/* end desktop grid */}
 
       </div>
     </section>
