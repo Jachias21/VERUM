@@ -121,7 +121,7 @@ export default function CTAFinal() {
           </a>
           {" · "}
           <a
-            href="https://github.com"
+            href="https://github.com/jachias21/VERUM"
             target="_blank"
             rel="noopener noreferrer"
             className="transition-colors hover:text-navy"
