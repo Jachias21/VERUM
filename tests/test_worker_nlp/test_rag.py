@@ -159,7 +159,8 @@ async def test_hybrid_search_qdrant_hit(mock_qdrant_hits):
         result = await hybrid_search(qid, "El virus de Madrid no existe", ["Madrid", "virus"])
 
     assert isinstance(result, NLPResult)
-    assert result.verdict == "FAKE"
+    # verdict is placeholder; final verdict is set by synthesize_verdict
+    assert result.verdict == "UNVERIFIED"
     assert result.retrieved_context != ""
     assert result.summary == "", "summary must be empty until synthesize_verdict is called"
 
@@ -193,7 +194,8 @@ async def test_hybrid_search_google_fallback():
 
         result = await hybrid_search(uuid.uuid4(), "Noticia de prueba para test", ["Madrid"])
 
-    assert result.verdict == "FAKE"
+    # verdict is placeholder; final verdict is set by synthesize_verdict
+    assert result.verdict == "UNVERIFIED"
     assert result.source_url == "https://factcheck.google.com/claim/1"
     assert "Fact checked article text" in result.retrieved_context
 
@@ -235,11 +237,11 @@ async def test_synthesize_verdict_truncates_context():
     ):
         from services.worker_nlp.app.rag import synthesize_verdict
 
-        await synthesize_verdict("texto del mensaje viral", result)
+        await synthesize_verdict(result, "texto del mensaje viral")
 
-    assert "retrieved_article" in captured_kwargs, "LLM chain must receive 'retrieved_article'"
-    assert len(captured_kwargs["retrieved_article"]) <= 1500, (
-        f"retrieved_article passed to LLM must be <= 1500 chars, got {len(captured_kwargs['retrieved_article'])}"
+    assert "context" in captured_kwargs, "LLM chain must receive 'context'"
+    assert len(captured_kwargs["context"]) <= 1500, (
+        f"context passed to LLM must be <= 1500 chars, got {len(captured_kwargs['context'])}"
     )
 
 
@@ -340,7 +342,8 @@ async def test_hybrid_search_uses_gnews_when_google_fc_empty():
 
         result = await hybrid_search(uuid.uuid4(), "Noticia de prueba sobre un bulo", ["Madrid", "virus"])
 
-    assert result.verdict == "FAKE"
+    # verdict is placeholder; final verdict is set by synthesize_verdict
+    assert result.verdict == "UNVERIFIED"
     assert result.source_url == "https://gnews.example.com/article/gnews1"
     assert result.retrieved_context == "Este bulo sobre el virus en Madrid ha sido desmentido por múltiples fuentes."
     assert result.fact_check_matches == 1
@@ -377,6 +380,29 @@ async def test_hybrid_search_prioritizes_google_fc_over_gnews():
 
         result = await hybrid_search(uuid.uuid4(), "Noticia de prueba", ["Madrid"])
 
-    assert result.verdict == "REAL"
+    # verdict is placeholder; final verdict is set by synthesize_verdict
+    assert result.verdict == "UNVERIFIED"
     assert result.source_url == "https://factcheck.google.com/claim/99"
     assert result.retrieved_context == "La afirmación sobre Madrid es verdadera según múltiples fuentes verificadas."
+
+
+# ── Test: L3 sentinel — no context available, LLM uses general knowledge ──────
+
+async def test_hybrid_search_l3_no_context_uses_general_knowledge_sentinel():
+    """When no source provides reliable context, hybrid_search returns the L3 sentinel."""
+    from services.worker_nlp.app.rag import hybrid_search
+
+    with (
+        patch("services.worker_nlp.app.rag._search_qdrant", new=AsyncMock(return_value=[])),
+        patch("services.worker_nlp.app.rag._search_google_fact_check", new=AsyncMock(return_value=[])),
+        patch("services.worker_nlp.app.rag._search_gnews", new=AsyncMock(return_value=[])),
+    ):
+        result = await hybrid_search(
+            uuid.uuid4(),
+            "El Muro de Berlín cayó en 1989, es un hecho histórico bien documentado.",
+            ["Muro de Berlín", "1989"],
+        )
+
+    assert result.summary == "__USE_GENERAL_KNOWLEDGE__"
+    assert result.retrieved_context == ""
+    assert result.fact_check_matches == 0

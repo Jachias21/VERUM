@@ -95,11 +95,10 @@ async def _run_one(example: dict[str, Any]) -> dict[str, Any]:
         if rag_result.retrieved_context:
             topic_overlap = _topic_overlap_score(entities, rag_result.retrieved_context)
 
-        summary = await synthesize_verdict(text, rag_result)
-        rag_result.summary = summary
+        rag_result = await synthesize_verdict(rag_result, text)
 
         # LLM verdict override (same logic as worker.py)
-        llm_verdict = _extract_verdict_from_llm_output(summary)
+        llm_verdict = _extract_verdict_from_llm_output(rag_result.summary)
         predicted = llm_verdict if llm_verdict is not None else rag_result.verdict
 
         latency_ms = int((time.monotonic() - t0) * 1000)

@@ -32,6 +32,18 @@ logger = logging.getLogger("verum.rag")
 # In-memory cache for Google Fact Check API results (asyncio single-thread, no lock needed)
 _google_fc_cache: TTLCache = TTLCache(maxsize=256, ttl=300)
 
+# Session-level GNews circuit-breaker: set to True on first 403/429 to stop
+# hammering the API when the key plan is exhausted or forbidden.
+_gnews_session_disabled: bool = False
+
+
+def _disable_gnews_session() -> None:
+    global _gnews_session_disabled
+    _gnews_session_disabled = True
+
+# ── Ollama configuration ──────────────────────────────────────────────────────
+OLLAMA_TIMEOUT_SECONDS: float = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "600"))
+
 # ── NL verdict patterns — compiled once at import time ────────────────────────
 # Tier 2: Spanish natural-language signals
 _FAKE_NL_PATTERNS: list[re.Pattern] = [
@@ -67,6 +79,103 @@ _UNVERIFIED_EN_PATTERNS: list[re.Pattern] = [
 ]
 
 
+# ── LLM prompt templates ─────────────────────────────────────────────────────
+
+_PROMPT_WITH_CONTEXT = """Eres un verificador de hechos. Tu tarea es decidir si un mensaje viral es VERDADERO, FALSO o NO VERIFICADO basándote en un artículo de referencia.
+
+REGLAS:
+1. El veredicto se aplica al MENSAJE VIRAL, no al artículo.
+2. Si el artículo CONFIRMA lo que dice el mensaje → VERDADERO.
+3. Si el artículo REFUTA lo que dice el mensaje (incluso si el artículo es un fact-check que desmiente una versión opuesta) → FALSO.
+4. Si el artículo trata un tema relacionado pero NO determina la veracidad del mensaje → NO VERIFICADO.
+5. Atención a las dobles negaciones: si el mensaje dice "X no es cierto" y el artículo dice "es falso que X" → ambos coinciden → VERDADERO.
+
+EJEMPLOS:
+
+Mensaje: "WhatsApp pasará a ser de pago"
+Artículo: "Es falso que WhatsApp vaya a cobrar. La empresa lo ha desmentido."
+Análisis: el artículo refuta el mensaje.
+VEREDICTO: FALSO
+
+Mensaje: "Las vacunas COVID son seguras y eficaces"
+Artículo: "La OMS confirma la seguridad de las vacunas COVID tras estudios de fase 3."
+Análisis: el artículo confirma el mensaje.
+VEREDICTO: VERDADERO
+
+Mensaje: "No hay nanopartículas en las personas vacunadas"
+Artículo: "Es falso que un estudio japonés haya encontrado nanopartículas de ARNm en vacunados."
+Análisis: el artículo desmiente la versión opuesta → confirma el mensaje.
+VEREDICTO: VERDADERO
+
+Mensaje: "El Gobierno regala 200€ a todos los pensionistas"
+Artículo: "Análisis semanal de bulos en redes sociales: contenido tangencial."
+Análisis: tema relacionado pero no determina la afirmación.
+VEREDICTO: NO VERIFICADO
+
+AHORA EVALÚA:
+
+Mensaje viral: {claim}
+
+Artículo de referencia: {context}
+
+Tu primera línea DEBE empezar con "VEREDICTO: " seguido de FALSO, VERDADERO o NO VERIFICADO. Tras el veredicto, escribe 2-3 líneas explicando brevemente la decisión, citando el artículo.
+"""
+
+_PROMPT_GENERAL_KNOWLEDGE = """Eres un verificador de hechos experto. No tienes un artículo de referencia: usa tu conocimiento general para evaluar un mensaje viral.
+
+REGLA DE ORO: ante CUALQUIER duda, responde NO VERIFICADO. Esta etiqueta NO es una derrota; es la respuesta CORRECTA cuando no puedes probar ni refutar el mensaje. Es preferible un NO VERIFICADO honesto a un FALSO precipitado.
+
+CRITERIOS:
+
+1. Responde FALSO solo cuando el mensaje contradice DIRECTAMENTE un hecho científico, histórico, geográfico o institucional bien establecido y de consenso amplio.
+   Ejemplo: "La Tierra es plana", "El hombre no llegó a la Luna", "Las vacunas causan autismo".
+
+2. Responde VERDADERO solo cuando el mensaje afirma un hecho científico, histórico, geográfico o institucional bien establecido y de consenso amplio.
+   Ejemplo: "El Muro de Berlín cayó en 1989", "España es miembro de la UE", "El agua hierve a 100°C al nivel del mar".
+
+3. Responde NO VERIFICADO en TODOS los demás casos, especialmente:
+   - Noticias sobre eventos recientes (últimos 24 meses) que requieran información actualizada.
+   - Declaraciones sobre personas vivas, políticos en activo, empresas, decisiones gubernamentales recientes.
+   - Datos económicos, estadísticas, indicadores que cambian con el tiempo.
+   - Detalles específicos médicos, legales, financieros que requieren verificación profesional.
+   - Predicciones futuras, opiniones, valoraciones subjetivas.
+   - Información parcialmente cierta o cierta solo bajo ciertas condiciones.
+   - Cualquier afirmación donde no estés seguro al 95%.
+
+EJEMPLOS DETALLADOS:
+
+Mensaje: "El presidente del Gobierno firmará la ley X la próxima semana"
+Análisis: predicción futura sobre actor político actual. No es verificable.
+VEREDICTO: NO VERIFICADO
+
+Mensaje: "El IPC de España en abril fue del 2,3%"
+Análisis: dato económico específico y reciente. Requiere consulta al INE; no puedo confirmar de memoria.
+VEREDICTO: NO VERIFICADO
+
+Mensaje: "Pedro Sánchez es presidente del Gobierno de España"
+Análisis: hecho político actual, pero requiere comprobar si sigue siéndolo hoy mismo.
+VEREDICTO: NO VERIFICADO
+
+Mensaje: "El cambio climático está causado principalmente por la actividad humana"
+Análisis: consenso científico amplio respaldado por el IPCC.
+VEREDICTO: VERDADERO
+
+Mensaje: "Las vacunas contienen microchips para rastrear a la población"
+Análisis: contradice directamente el conocimiento científico y técnico establecido.
+VEREDICTO: FALSO
+
+Mensaje: "El gobierno regala 200€ a todos los pensionistas este mes"
+Análisis: requiere verificación documental específica que no tengo. No puedo confirmar ni desmentir.
+VEREDICTO: NO VERIFICADO
+
+AHORA EVALÚA:
+
+Mensaje viral: {claim}
+
+Tu primera línea DEBE empezar con "VEREDICTO: " seguido EXACTAMENTE de una de estas tres palabras: FALSO, VERDADERO o NO VERIFICADO. Tras el veredicto, escribe 2-3 líneas explicando tu razonamiento. Si no estás completamente seguro, di NO VERIFICADO.
+"""
+
+
 async def hybrid_search(
     query_id: uuid.UUID,
     text: str,
@@ -74,10 +183,11 @@ async def hybrid_search(
 ) -> NLPResult:
     """
     Execute Level-1 local search; fall back to Level-2 API if needed.
-    Returns a partially-filled NLPResult (summary is filled by synthesize_verdict).
+    Returns a partially-filled NLPResult (verdict is placeholder; synthesize_verdict decides).
     """
-    threshold = float(os.getenv("NLP_CONFIDENCE_THRESHOLD", 0.75))
-    min_relevance = float(os.getenv("NLP_MIN_ARTICLE_SCORE", 0.40))
+    threshold = float(os.getenv("NLP_CONFIDENCE_THRESHOLD", 0.65))
+    min_relevance = float(os.getenv("NLP_MIN_ARTICLE_SCORE", 0.35))
+    min_overlap = float(os.getenv("NLP_TOPIC_OVERLAP_MIN", 0.30))
 
     logger.info(
         "hybrid_search: query_id=%s, entities=%s",
@@ -111,19 +221,22 @@ async def hybrid_search(
 
     if local_hits and local_hits[0]["score"] >= threshold:
         best = local_hits[0]
-        # Discard if article body or title is empty (badly formatted entry)
-        if not best.get("text", "").strip():
+        overlap = _topic_overlap_score(entities, best.get("text", ""))
+        if not best.get("text", "").strip() or overlap < min_overlap:
             logger.info(
-                "[rag] Discarding L1 hit (empty article body) score=%.3f for query_id=%s",
-                best["score"], query_id,
+                "[rag] L1 hit discarded (empty body or overlap %.2f < %.2f) for query_id=%s",
+                overlap, min_overlap, query_id,
             )
+            # fall through to L2
         else:
+            logger.info("[rag] L1 hit accepted (score=%.3f, overlap=%.2f) for query_id=%s",
+                        best["score"], overlap, query_id)
             return NLPResult(
                 query_id=query_id,
                 extracted_entities=entities,
                 fact_check_matches=len(local_hits),
                 source_url=best.get("url"),
-                verdict=best.get("verdict", "UNVERIFIED"),
+                verdict="UNVERIFIED",  # placeholder — LLM decides
                 retrieved_context=best.get("text", ""),
                 summary="",
             )
@@ -155,189 +268,136 @@ async def hybrid_search(
 
     if google_hits:
         best = google_hits[0]
-        min_overlap = float(os.getenv("NLP_TOPIC_OVERLAP_MIN", 0.25))
         overlap = _topic_overlap_score(entities, best.get("text", ""))
-        if overlap < min_overlap:
-            logger.warning(
-                "[rag] L2 hit topic mismatch (overlap=%.2f < %.2f) — forcing UNVERIFIED for query_id=%s",
-                overlap, min_overlap, query_id,
+        if best.get("text", "").strip() and overlap >= min_overlap:
+            logger.info(
+                "[rag] L2 Google FC hit accepted (overlap=%.2f) for query_id=%s",
+                overlap, query_id,
             )
             return NLPResult(
                 query_id=query_id,
                 extracted_entities=entities,
-                fact_check_matches=0,
-                source_url=None,
-                verdict="UNVERIFIED",
-                retrieved_context="",
+                fact_check_matches=len(google_hits),
+                source_url=best.get("url"),
+                verdict="UNVERIFIED",  # placeholder — LLM decides
+                retrieved_context=best.get("text", ""),
                 summary="",
             )
-        return NLPResult(
-            query_id=query_id,
-            extracted_entities=entities,
-            fact_check_matches=len(google_hits),
-            source_url=best.get("url"),
-            verdict=best.get("verdict", "UNVERIFIED"),
-            retrieved_context=best.get("text", ""),
-            summary="",
+        logger.warning(
+            "[rag] L2 Google FC hit discarded (empty body or overlap %.2f < %.2f) for query_id=%s",
+            overlap, min_overlap, query_id,
         )
 
     if gnews_hits:
         best = gnews_hits[0]
-        min_overlap = float(os.getenv("NLP_TOPIC_OVERLAP_MIN", 0.25))
         overlap = _topic_overlap_score(entities, best.get("text", ""))
-        if overlap < min_overlap:
-            logger.warning(
-                "[rag] L2 hit topic mismatch (overlap=%.2f < %.2f) — forcing UNVERIFIED for query_id=%s",
-                overlap, min_overlap, query_id,
+        if best.get("text", "").strip() and overlap >= min_overlap:
+            logger.info(
+                "[rag] L2 GNews hit accepted (overlap=%.2f) for query_id=%s",
+                overlap, query_id,
             )
             return NLPResult(
                 query_id=query_id,
                 extracted_entities=entities,
-                fact_check_matches=0,
-                source_url=None,
-                verdict="UNVERIFIED",
-                retrieved_context="",
+                fact_check_matches=len(gnews_hits),
+                source_url=best.get("url"),
+                verdict="UNVERIFIED",  # placeholder — LLM decides
+                retrieved_context=best.get("text", ""),
                 summary="",
             )
-        return NLPResult(
-            query_id=query_id,
-            extracted_entities=entities,
-            fact_check_matches=len(gnews_hits),
-            source_url=best.get("url"),
-            verdict=best.get("verdict", "UNVERIFIED"),
-            retrieved_context=best.get("text", ""),
-            summary="",
+        logger.warning(
+            "[rag] L2 GNews hit discarded (empty body or overlap %.2f < %.2f) for query_id=%s",
+            overlap, min_overlap, query_id,
         )
 
-    # L2 also empty — use best local hit only if relevance score is acceptable
+    # ── L1 medium: use best local hit if score >= min_relevance ──────────────
     if local_hits:
         best = local_hits[0]
         score = best["score"]
-        if score >= threshold:
-            # High-confidence hit: trust the stored verdict directly
-            return NLPResult(
-                query_id=query_id,
-                extracted_entities=entities,
-                fact_check_matches=len(local_hits),
-                source_url=best.get("url"),
-                verdict=best.get("verdict", "UNVERIFIED"),
-                retrieved_context=best.get("text", ""),
-                summary="",
-            )
         if score >= min_relevance:
-            # Moderate-confidence hit: pass context to LLM but start neutral so a
-            # topic-mismatch cannot propagate a stored FAKE/REAL to the user.
-            min_overlap = float(os.getenv("NLP_TOPIC_OVERLAP_MIN", 0.25))
             overlap = _topic_overlap_score(entities, best.get("text", ""))
-            _source_url = None if overlap < min_overlap else best.get("url")
-            if overlap < min_overlap:
+            if best.get("text", "").strip() and overlap >= min_overlap:
                 logger.info(
-                    "[rag] Last-resort hit topic mismatch (overlap=%.2f < %.2f) — clearing source_url for query_id=%s",
-                    overlap, min_overlap, query_id,
+                    "[rag] L1 medium hit accepted (score=%.3f, overlap=%.2f) for query_id=%s",
+                    score, overlap, query_id,
+                )
+                return NLPResult(
+                    query_id=query_id,
+                    extracted_entities=entities,
+                    fact_check_matches=len(local_hits),
+                    source_url=best.get("url"),
+                    verdict="UNVERIFIED",  # placeholder — LLM decides
+                    retrieved_context=best.get("text", ""),
+                    summary="",
                 )
             logger.info(
-                "[rag] Last-resort hit score=%.3f (min_relevance=%.2f < threshold=%.2f) "
-                "— forcing verdict=UNVERIFIED for query_id=%s",
-                score, min_relevance, threshold, query_id,
+                "[rag] L1 medium hit discarded (overlap %.2f < %.2f or empty body) for query_id=%s",
+                overlap, min_overlap, query_id,
             )
-            return NLPResult(
-                query_id=query_id,
-                extracted_entities=entities,
-                fact_check_matches=len(local_hits),
-                source_url=_source_url,
-                verdict="UNVERIFIED",
-                retrieved_context=best.get("text", ""),
-                summary="",
+        else:
+            logger.info(
+                "[rag] Discarding local hit score=%.3f < MIN_RELEVANCE=%.2f for query_id=%s",
+                score, min_relevance, query_id,
             )
-        logger.info(
-            "[rag] Discarding local hit score=%.3f < MIN_RELEVANCE=%.2f for query_id=%s",
-            score, min_relevance, query_id,
-        )
 
+    # ── L3: no reliable context — LLM uses general knowledge ─────────────────
+    logger.info(
+        "[rag] No reliable context found — invoking LLM with general knowledge for query_id=%s",
+        query_id,
+    )
     return NLPResult(
         query_id=query_id,
         extracted_entities=entities,
         fact_check_matches=0,
+        source_url=None,
         verdict="UNVERIFIED",
-        summary="",
+        retrieved_context="",
+        summary="__USE_GENERAL_KNOWLEDGE__",  # sentinel for synthesize_verdict
     )
 
 
-async def synthesize_verdict(text: str, result: NLPResult) -> str:
+async def synthesize_verdict(result: NLPResult, claim_text: str) -> NLPResult:
     """
-    Send the viral message and the retrieved fact-checking article to Ollama
-    and ask the SLM to produce a 3-4 line verdict.
-    Temperature is kept at 0 to minimise hallucination.
+    Invoke LLM to decide the final verdict given retrieved context and the user claim.
+    Detects the __USE_GENERAL_KNOWLEDGE__ sentinel to select the appropriate prompt.
+    Sets result.verdict and result.summary in-place and returns the modified result.
     """
-    retrieved_article = result.retrieved_context
-    retrieved_article = retrieved_article[:1500]  # truncate to avoid context overflow in the SLM
+    use_general_knowledge = result.summary == "__USE_GENERAL_KNOWLEDGE__"
 
-    if not retrieved_article:
-        return (
-            "No se ha encontrado un artículo de referencia con suficiente relevancia "
-            "para emitir un veredicto fundamentado."
-        )
+    if use_general_knowledge:
+        prompt_template = _PROMPT_GENERAL_KNOWLEDGE
+        prompt_inputs = {"claim": claim_text[:1500]}
+        input_variables = ["claim"]
+    else:
+        prompt_template = _PROMPT_WITH_CONTEXT
+        context_truncated = (result.retrieved_context or "")[:1500]
+        prompt_inputs = {"claim": claim_text[:1500], "context": context_truncated}
+        input_variables = ["claim", "context"]
 
     _ollama_host = os.getenv("OLLAMA_HOST", "ollama")
     _ollama_port = os.getenv("OLLAMA_PORT", "11434")
     ollama_url = f"http://{_ollama_host}:{_ollama_port}"
-    model_name = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
+    model_name = os.getenv("OLLAMA_MODEL", "qwen2.5:14b-instruct-q4_K_M")
 
     prompt = PromptTemplate(
-        input_variables=["message_text", "retrieved_article"],
-        template=(
-            "Eres un verificador de hechos objetivo e imparcial.\n"
-            "Tu ÚNICA fuente de información es el artículo de referencia que se te proporciona.\n"
-            "NO inventes datos ni uses conocimiento externo al artículo.\n\n"
-            "MENSAJE VIRAL A VERIFICAR:\n{message_text}\n\n"
-            "ARTÍCULO DE REFERENCIA:\n{retrieved_article}\n\n"
-            "Basándote ÚNICAMENTE en el artículo de referencia, escribe un veredicto de "
-            "3 a 4 líneas explicando si el mensaje viral es verdadero o falso y por qué. "
-            "Sé conciso, directo y cita el artículo. "
-            "Escribe en párrafo continuo, sin viñetas ni listas.\n\n"
-            "Si el artículo de referencia describe claramente un bulo, fraude o contenido "
-            "falso, el veredicto debe comenzar con 'VEREDICTO: FALSO'. "
-            "Si confirma la veracidad, debe comenzar con 'VEREDICTO: VERDADERO'. "
-            "Si no hay suficiente información, usar 'VEREDICTO: NO VERIFICADO'.\n\n"
-            "IMPORTANTE: Si el artículo de referencia trata de un TEMA DISTINTO al del mensaje viral "
-            "(aunque comparta alguna palabra clave como una ciudad o un nombre genérico), "
-            "tu PRIMERA palabra DEBE ser 'VEREDICTO:' seguida de 'NO VERIFICADO'.\n\n"
-            "EJEMPLOS:\n"
-            "---\n"
-            "Mensaje viral: \"El 5G propaga el coronavirus.\"\n"
-            "Artículo: Expertos de la OMS desmienten el bulo de que el 5G tenga relación con el "
-            "coronavirus. La tecnología 5G no transmite enfermedades.\n"
-            "VEREDICTO: FALSO — El artículo desmiente directamente el bulo: la OMS confirma que "
-            "el 5G no tiene ninguna relación con el coronavirus.\n\n"
-            "---\n"
-            "Mensaje viral: \"El cohete Artemis II ha llegado a la Luna con éxito.\"\n"
-            "Artículo: La NASA confirma que la misión Artemis II ha completado con éxito su "
-            "trayectoria lunar tripulada.\n"
-            "VEREDICTO: VERDADERO — El artículo confirma explícitamente que la misión Artemis II "
-            "completó su trayectoria lunar.\n\n"
-            "---\n"
-            "Mensaje viral: \"El virus del Ébola se está extendiendo por Europa en 2024.\"\n"
-            "Artículo: El Real Madrid ganó la Liga de Campeones por decimoquinta vez tras vencer "
-            "al Borussia Dortmund en la final de Wembley.\n"
-            "VEREDICTO: NO VERIFICADO — El artículo trata un tema completamente distinto (fútbol) "
-            "y no aporta ninguna información sobre el Ébola ni sobre brotes virales en Europa.\n"
-            "---\n\n"
-            "VEREDICTO:"
-        ),
+        input_variables=input_variables,
+        template=prompt_template,
     )
 
-    logger.info("[rag] Ollama synthesis — model=%s url=%s", model_name, ollama_url)
+    logger.info(
+        "[rag] Ollama synthesis — model=%s url=%s use_general_knowledge=%s",
+        model_name, ollama_url, use_general_knowledge,
+    )
     llm = OllamaLLM(base_url=ollama_url, model=model_name, temperature=0.0)  # type: ignore[call-arg]
     chain = prompt | llm
 
     MAX_RETRIES = 2
-    OLLAMA_TIMEOUT_SECONDS = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", 45))
 
     for attempt in range(MAX_RETRIES + 1):
         try:
             t0 = time.monotonic()
             verdict_text: str = await asyncio.wait_for(
-                chain.ainvoke({"message_text": text, "retrieved_article": retrieved_article}),
+                chain.ainvoke(prompt_inputs),
                 timeout=OLLAMA_TIMEOUT_SECONDS,
             )
             elapsed_ms = int((time.monotonic() - t0) * 1000)
@@ -346,28 +406,35 @@ async def synthesize_verdict(text: str, result: NLPResult) -> str:
                 "Ollama responded in %dms (attempt=%d): %r",
                 elapsed_ms, attempt + 1, verdict_stripped[:150],
             )
-            return verdict_stripped
+            extracted_verdict = _extract_verdict_from_llm_output(verdict_stripped)
+            if extracted_verdict is not None:
+                result.verdict = extracted_verdict
+            result.summary = verdict_stripped
+            return result
         except asyncio.TimeoutError:
             logger.warning(
                 "[rag] Ollama timeout after %ds (attempt=%d/%d)",
                 OLLAMA_TIMEOUT_SECONDS, attempt + 1, MAX_RETRIES + 1,
             )
             if attempt == MAX_RETRIES:
-                return (
+                result.summary = (
                     "El modelo de síntesis tardó demasiado en responder. "
                     "Consulta directamente la fuente para verificar manualmente."
                 )
+                return result
             await asyncio.sleep(2 ** attempt)
         except Exception as exc:
             logger.error("[rag] Ollama synthesis error (attempt %d/%d): %s", attempt + 1, MAX_RETRIES + 1, exc)
             if attempt == MAX_RETRIES:
-                return (
+                result.summary = (
                     "No se ha podido generar el resumen explicativo. "
                     "Consulta directamente la fuente."
                 )
+                return result
             await asyncio.sleep(2 ** attempt)
     # Unreachable, but satisfies type checkers
-    return "No se ha podido generar el resumen explicativo. Consulta directamente la fuente."
+    result.summary = "No se ha podido generar el resumen explicativo. Consulta directamente la fuente."
+    return result
 
 
 def _extract_verdict_from_llm_output(text: str) -> str | None:
@@ -594,11 +661,15 @@ async def _search_google_fact_check(query: str, lang: str = "es") -> list[dict]:
 async def _search_gnews(query: str, lang: str = "es") -> list[dict]:
     """Search GNews API for fact-check related articles.
 
-    Returns [] silently when GNEWS_API_KEY is absent or the request fails.
+    Returns [] silently when GNEWS_API_KEY is absent, the request fails,
+    or the API has returned a 403/429 during this session.
     """
     api_key = os.getenv("GNEWS_API_KEY", "")
     if not api_key:
         logger.warning("[rag] GNews API: key not configured — skipping")
+        return []
+    if _gnews_session_disabled:
+        logger.debug("[rag] GNews API: skipping — disabled for this session (prior 403/429)")
         return []
     logger.info("[rag] GNews API: key_present=True, querying...")
     url = "https://gnews.io/api/v4/search"
@@ -616,10 +687,27 @@ async def _search_gnews(query: str, lang: str = "es") -> list[dict]:
                 url,
                 params={"q": query_clean, "lang": lang, "token": api_key, "max": 5},
             )
+            if resp.status_code == 403:
+                _disable_gnews_session()
+                logger.warning(
+                    "[rag] GNews API: 403 Forbidden — API key plan does not allow this request. "
+                    "GNews will be skipped for the rest of this session."
+                )
+                return []
+            if resp.status_code == 429:
+                _disable_gnews_session()
+                logger.warning(
+                    "[rag] GNews API: 429 Too Many Requests — rate limit exceeded. "
+                    "GNews will be skipped for the rest of this session."
+                )
+                return []
             resp.raise_for_status()
             articles = resp.json().get("articles", [])
+    except httpx.HTTPStatusError as exc:
+        logger.warning("[rag] GNews API HTTP error %s: %s", exc.response.status_code, exc)
+        return []
     except Exception as exc:
-        logger.error("[rag] GNews API error: %s", exc)
+        logger.warning("[rag] GNews API error: %s", exc)
         return []
     results = []
     for article in articles:

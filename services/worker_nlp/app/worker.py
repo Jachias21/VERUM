@@ -180,7 +180,7 @@ async def process(message: aio_pika.abc.AbstractIncomingMessage) -> None:
                     hybrid_search(task.query_id, task.text, entities),
                     timeout=80.0,
                 )
-                result.summary = await synthesize_verdict(task.text, result)
+                result = await synthesize_verdict(result, task.text)
 
                 # Override reply when the LLM had no relevant context to work with
                 _no_info_override = _is_no_info_response(result.summary)

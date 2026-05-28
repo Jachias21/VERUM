@@ -76,7 +76,9 @@ def test_infer_verdict_fake_keyword_in_title():
     from services.etl.app.pipeline import _infer_verdict_from_entry
 
     entry = {"title": "Es falso que el 5G cause cáncer", "summary": "", "tags": []}
-    assert _infer_verdict_from_entry(entry, publisher="Reuters") == "FAKE"
+    assert _infer_verdict_from_entry(
+        entry, source_url="https://reuters.com/article/123"
+    ) == "FAKE"
 
 
 def test_infer_verdict_real_keyword_verified():
@@ -90,8 +92,8 @@ def test_infer_verdict_real_keyword_verified():
     assert _infer_verdict_from_entry(entry) == "REAL"
 
 
-def test_infer_verdict_factchecker_without_keywords_is_unverified():
-    """A factchecker publisher without lexical signals defaults to UNVERIFIED."""
+def test_infer_verdict_factchecker_domain_without_keywords_is_unverified():
+    """Maldita.es URL without lexical signals → UNVERIFIED."""
     from services.etl.app.pipeline import _infer_verdict_from_entry
 
     entry = {
@@ -99,47 +101,69 @@ def test_infer_verdict_factchecker_without_keywords_is_unverified():
         "summary": "Resumen semanal sin palabras clave.",
         "tags": [],
     }
-    assert _infer_verdict_from_entry(entry, publisher="maldita") == "UNVERIFIED"
+    assert _infer_verdict_from_entry(
+        entry, source_url="https://maldita.es/feed/"
+    ) == "UNVERIFIED"
 
 
-def test_infer_verdict_factchecker_with_debunk_keywords_is_fake():
-    """When debunk keywords are present, the verdict is FAKE regardless of publisher."""
+def test_infer_verdict_factchecker_domain_with_debunk_keywords_is_fake():
+    """Lexical FAKE signal beats domain class."""
     from services.etl.app.pipeline import _infer_verdict_from_entry
 
     entry = {
         "title": "Es falso que las vacunas contengan microchips",
-        "summary": "Maldita desmiente este bulo viral sobre las vacunas.",
+        "summary": "Maldita desmiente este bulo viral.",
         "tags": [],
     }
-    assert _infer_verdict_from_entry(entry, publisher="maldita") == "FAKE"
+    assert _infer_verdict_from_entry(
+        entry, source_url="https://maldita.es/feed/"
+    ) == "FAKE"
 
 
-def test_infer_verdict_institutional_publisher_defaults_to_real():
-    """Institutional publishers without lexical FAKE signals default to REAL."""
+def test_infer_verdict_institutional_domain_defaults_to_real():
+    """Moncloa URL without lexical FAKE signals → REAL."""
     from services.etl.app.pipeline import _infer_verdict_from_entry
 
     entry = {
         "title": "El Gobierno aprueba el nuevo Real Decreto de pensiones",
-        "summary": "El Consejo de Ministros ha aprobado hoy el RD que regula la subida del SMI.",
+        "summary": "El Consejo de Ministros aprueba la subida del SMI.",
         "tags": [],
     }
-    assert _infer_verdict_from_entry(entry, publisher="Moncloa") == "REAL"
+    assert _infer_verdict_from_entry(
+        entry, source_url="https://www.lamoncloa.gob.es/some/path"
+    ) == "REAL"
 
 
-def test_infer_verdict_institutional_publisher_with_fake_keyword_stays_fake():
-    """Lexical FAKE signal must override institutional default."""
+def test_infer_verdict_institutional_subdomain_defaults_to_real():
+    """Subdomains of institutional domains must also be recognized."""
+    from services.etl.app.pipeline import _infer_verdict_from_entry
+
+    entry = {
+        "title": "Latest from European Central Bank press release",
+        "summary": "The ECB raises interest rates by 25 basis points.",
+        "tags": [],
+    }
+    assert _infer_verdict_from_entry(
+        entry, source_url="https://feeds.ecb.europa.eu/press/release/123"
+    ) == "REAL"
+
+
+def test_infer_verdict_institutional_domain_with_fake_keyword_stays_fake():
+    """Lexical FAKE signal beats institutional default."""
     from services.etl.app.pipeline import _infer_verdict_from_entry
 
     entry = {
         "title": "La OMS desmiente el bulo sobre la vacuna",
-        "summary": "Es falso lo que circula en redes sobre el contenido de la vacuna.",
+        "summary": "Es falso lo que circula en redes.",
         "tags": [],
     }
-    assert _infer_verdict_from_entry(entry, publisher="WHO") == "FAKE"
+    assert _infer_verdict_from_entry(
+        entry, source_url="https://www.who.int/news/item/123"
+    ) == "FAKE"
 
 
 def test_infer_verdict_both_signals_is_unverified():
-    """If both FAKE and REAL keywords appear, the verdict is UNVERIFIED."""
+    """Both FAKE and REAL keywords present → UNVERIFIED."""
     from services.etl.app.pipeline import _infer_verdict_from_entry
 
     entry = {
@@ -147,11 +171,11 @@ def test_infer_verdict_both_signals_is_unverified():
         "summary": "Análisis del caso.",
         "tags": [],
     }
-    assert _infer_verdict_from_entry(entry, publisher="") == "UNVERIFIED"
+    assert _infer_verdict_from_entry(entry, source_url="") == "UNVERIFIED"
 
 
-def test_infer_verdict_unknown_publisher_is_unverified():
-    """Unknown publisher without lexical signals defaults to UNVERIFIED."""
+def test_infer_verdict_unknown_domain_is_unverified():
+    """Unknown domain without lexical signals → UNVERIFIED."""
     from services.etl.app.pipeline import _infer_verdict_from_entry
 
     entry = {
@@ -159,7 +183,35 @@ def test_infer_verdict_unknown_publisher_is_unverified():
         "summary": "Información variada sin contexto.",
         "tags": [],
     }
-    assert _infer_verdict_from_entry(entry, publisher="Some Random Blog") == "UNVERIFIED"
+    assert _infer_verdict_from_entry(
+        entry, source_url="https://some-random-blog.example.com/post"
+    ) == "UNVERIFIED"
+
+
+def test_infer_verdict_empty_url_falls_back_to_unverified():
+    """Missing source_url must not break classification — defaults to UNVERIFIED."""
+    from services.etl.app.pipeline import _infer_verdict_from_entry
+
+    entry = {
+        "title": "Noticia neutra sin pistas",
+        "summary": "Sin palabras clave.",
+        "tags": [],
+    }
+    assert _infer_verdict_from_entry(entry) == "UNVERIFIED"
+
+
+def test_infer_verdict_www_prefix_is_normalized():
+    """Domain matching must ignore 'www.' prefix."""
+    from services.etl.app.pipeline import _infer_verdict_from_entry
+
+    entry = {
+        "title": "Press release from a national statistics institute",
+        "summary": "New monthly CPI figures published.",
+        "tags": [],
+    }
+    assert _infer_verdict_from_entry(
+        entry, source_url="https://www.ine.es/some/path"
+    ) == "REAL"
 
 
 # ── extract ───────────────────────────────────────────────────────────────────
