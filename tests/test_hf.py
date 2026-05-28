@@ -1,3 +1,4 @@
+"""
 import os
 from pathlib import Path
 
@@ -16,3 +17,21 @@ image = client.text_to_image(
 )
 image.save("test_image.png")
 print("OK:", image.size)
+"""
+# test_hf.py
+from huggingface_hub import InferenceClient
+import os
+
+token = os.environ.get("HUGGING_FACE")
+print(f"Token: {token[:10]}...")
+
+client = InferenceClient(token=token)
+try:
+    image = client.text_to_image(
+        prompt="a cat",
+        model="stabilityai/stable-diffusion-xl-base-1.0",
+    )
+    print("OK:", image.size)
+except Exception as e:
+    print(f"Error tipo: {type(e).__name__}")
+    print(f"Error: {e}")
