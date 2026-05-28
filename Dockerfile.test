@@ -1,0 +1,55 @@
+# =============================================================================
+#  Dockerfile.test — Imagen de tests para VERUM
+#  Consolida dependencias de worker_nlp, gateway y etl + pytest
+#  Uso: docker compose --profile test run --rm test_runner
+# =============================================================================
+
+FROM python:3.11-slim
+
+# Evita prompts interactivos durante la instalacion de paquetes del sistema
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# Dependencias del sistema necesarias para compilar algunas wheels (ej. aiohttp, cffi)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# -- Dependencias de los tres servicios que cubren los tests ------------------
+
+# Copiamos primero solo los requirements para aprovechar la cache de Docker
+COPY services/worker_nlp/requirements.txt /tmp/req_nlp.txt
+COPY services/gateway/requirements.txt    /tmp/req_gateway.txt
+COPY services/etl/requirements.txt        /tmp/req_etl.txt
+
+RUN pip install --no-cache-dir \
+      -r /tmp/req_nlp.txt \
+      -r /tmp/req_gateway.txt \
+      -r /tmp/req_etl.txt
+
+# -- Herramientas de testing y evaluacion ------------------------------------
+RUN pip install --no-cache-dir pytest pytest-asyncio scikit-learn matplotlib
+
+# -- Modelos SpaCy ------------------------------------------------------------
+RUN python -m spacy download es_core_news_lg && \
+    python -m spacy download en_core_web_sm
+
+# -- Codigo fuente del proyecto -----------------------------------------------
+# (tests/ y shared/ se montan como volumen read-only en docker-compose.yml,
+#  pero los incluimos en la imagen para que funcione tambien con docker run directo)
+COPY services/ /app/services/
+COPY shared/   /app/shared/
+COPY models/   /app/models/
+COPY tests/    /app/tests/
+COPY scripts/  /app/scripts/
+COPY pytest.ini /app/pytest.ini
+
+# WORKDIR en la raiz del proyecto garantiza que los imports
+#   from services.worker_nlp.app.ner import ...
+#   from shared.schemas import ...
+# se resuelvan correctamente
+CMD ["pytest", "tests/", "-v", "--tb=short", "--color=yes"]

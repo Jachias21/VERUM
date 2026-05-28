@@ -50,6 +50,7 @@ data/custom/
 *.csv
 *.parquet
 *.jsonl
+!tests/golden/*.jsonl
 *.arrow
 *.feather
 *.h5
@@ -79,6 +80,9 @@ Thumbs.db
 /tmp/
 *.tmp
 heatmap_*.png                   # Grad-CAM generados en runtime
+
+# ── Outputs de evaluacion NLP (generados por make eval-nlp) ──────────────────
+reports/
 
 
 VERUM_TFM.md

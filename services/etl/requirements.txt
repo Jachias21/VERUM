@@ -1,6 +1,7 @@
 pydantic
 python-dotenv
 
+
 # Extraction
 httpx           # HTTP for RSS / APIs
 feedparser    # RSS parsing
@@ -11,3 +12,12 @@ fastembed>=0.3.0         # BAAI/bge-m3 dense (ONNX) + Qdrant/bm25 sparse vectors
 
 # Load
 qdrant-client>=1.9.0
+
+# Test
+pytest
+tail
+motor
+prometheus_client
+spacy
+opencv-python-headless
+torchvision
