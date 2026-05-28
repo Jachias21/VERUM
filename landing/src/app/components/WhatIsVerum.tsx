@@ -290,26 +290,18 @@ export default function WhatIsVerum() {
                 {t.analiza.desc}
               </p>
             </div>
-            {/* Vertical divider */}
-            <div style={{
-              width: "1px",
-              background: "#E6E8ED",
-              alignSelf: "stretch",
-              margin: "0 24px",
-              flexShrink: 0,
-            }} />
             {/* Right decorative number */}
             <div style={{
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
               justifyContent: "center",
-              minWidth: "100px",
+              minWidth: "120px",
               flexShrink: 0,
             }}>
               <span style={{
                 fontFamily: "var(--font-poppins)",
-                fontSize: "4.5rem",
+                fontSize: "5.5rem",
                 fontWeight: 700,
                 color: "var(--color-teal-light)",
                 lineHeight: 1,
@@ -321,7 +313,7 @@ export default function WhatIsVerum() {
                 fontSize: "0.8rem",
                 fontWeight: 600,
                 color: "var(--color-teal)",
-                marginTop: "4px",
+                marginTop: "0.35rem",
                 letterSpacing: "0.04em",
               }}>
                 {t.analiza.decLabel}
@@ -409,56 +401,6 @@ export default function WhatIsVerum() {
             }}>
               {t.explica.desc}
             </p>
-            {/* Verdict badge */}
-            <div style={{ marginTop: "20px" }}>
-              <div style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "8px",
-                padding: "8px 14px",
-                borderRadius: "999px",
-                background: "#FFF0F0",
-                border: "1px solid #FFCDD2",
-              }}>
-                <div style={{
-                  width: "8px",
-                  height: "8px",
-                  background: "#E53935",
-                  borderRadius: "50%",
-                  flexShrink: 0,
-                }} />
-                <span style={{
-                  fontFamily: "var(--font-nunito)",
-                  fontSize: "0.875rem",
-                  fontWeight: 500,
-                  color: "#C62828",
-                  whiteSpace: "nowrap",
-                }}>
-                  {lang === "es" ? "FALSO detectado" : "FAKE detected"}
-                </span>
-              </div>
-              <div style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "4px",
-                marginTop: "8px",
-              }}>
-                <span style={{
-                  fontFamily: "var(--font-nunito)",
-                  fontSize: "0.75rem",
-                  color: "var(--color-text-secondary)",
-                }}>
-                  {lang === "es" ? "Fuente: Maldita.es" : "Source: Maldita.es"}
-                </span>
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                  style={{ color: "var(--color-text-secondary)", flexShrink: 0 }}>
-                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                  <polyline points="15 3 21 3 21 9" />
-                  <line x1="10" y1="14" x2="21" y2="3" />
-                </svg>
-              </div>
-            </div>
           </motion.div>
 
           {/* Card Protege — cols 2-3, row 2 */}
@@ -509,42 +451,25 @@ export default function WhatIsVerum() {
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
-              justifyContent: "flex-end",
-              paddingBottom: "8px",
-              minWidth: "120px",
+              justifyContent: "center",
+              minWidth: "100px",
               flexShrink: 0,
             }}>
-              {/* RGPD pill */}
-              <div style={{
-                background: "rgba(13,27,42,0.10)",
-                borderRadius: "999px",
-                padding: "3px 10px",
-                marginBottom: "12px",
-              }}>
-                <span style={{
-                  fontFamily: "var(--font-poppins)",
-                  fontSize: "10px",
-                  fontWeight: 600,
-                  color: "var(--color-navy)",
-                }}>
-                  🔒 RGPD
-                </span>
-              </div>
               <span style={{
                 fontFamily: "var(--font-poppins)",
-                fontSize: "6rem",
+                fontSize: "5.5rem",
                 fontWeight: 700,
-                color: "rgba(13,27,42,0.12)",
+                color: "rgba(13,27,42,0.15)",
                 lineHeight: 1,
               }}>
                 0
               </span>
               <span style={{
                 fontFamily: "var(--font-nunito)",
-                fontSize: "0.75rem",
+                fontSize: "0.8rem",
                 fontWeight: 600,
-                color: "rgba(13,27,42,0.4)",
-                marginTop: "-8px",
+                color: "var(--color-navy)",
+                marginTop: "0.35rem",
                 letterSpacing: "0.04em",
                 textAlign: "center",
               }}>

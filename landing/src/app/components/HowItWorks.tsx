@@ -2,64 +2,10 @@
 
 import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useScroll } from "framer-motion";
 import { useLanguage } from "../context/LanguageContext";
 
-const steps = {
-  es: [
-    {
-      num: "01",
-      mascot: "/mascot/verum-saludando.png",
-      title: "Envías el contenido",
-      desc: "Manda la imagen o texto sospechoso al bot de Telegram",
-    },
-    {
-      num: "02",
-      mascot: "/mascot/verum-lupa.png",
-      title: "VERUM analiza",
-      desc: "Aplica visión forense y análisis de frecuencias para detectar manipulación",
-    },
-    {
-      num: "03",
-      mascot: "/mascot/verum-focus.png",
-      title: "Verifica las fuentes",
-      desc: "Cruza los datos con bases de verificación oficiales y artículos de fact-checking",
-    },
-    {
-      num: "04",
-      mascot: "/mascot/verum-escudo.png",
-      title: "Recibes el veredicto",
-      desc: "Respuesta clara, explicada y con fuentes en menos de 15 segundos",
-    },
-  ],
-  en: [
-    {
-      num: "01",
-      mascot: "/mascot/verum-saludando.png",
-      title: "You send the content",
-      desc: "Send the suspicious image or text to the Telegram bot",
-    },
-    {
-      num: "02",
-      mascot: "/mascot/verum-lupa.png",
-      title: "VERUM analyzes",
-      desc: "Applies forensic vision and frequency analysis to detect manipulation",
-    },
-    {
-      num: "03",
-      mascot: "/mascot/verum-focus.png",
-      title: "Verifies sources",
-      desc: "Cross-references data with official verification databases",
-    },
-    {
-      num: "04",
-      mascot: "/mascot/verum-escudo.png",
-      title: "You get the verdict",
-      desc: "Clear, explained response with sources in under 15 seconds",
-    },
-  ],
-};
-
+/* ─── Translations ───────────────────────────────────────────────── */
 const translations = {
   es: {
     eyebrow: "CÓMO FUNCIONA",
@@ -71,43 +17,159 @@ const translations = {
   },
 };
 
+/* ─── Steps data ─────────────────────────────────────────────────── */
+const stepsData = [
+  {
+    number: "01",
+    mascot: "/mascot/verum-saludando.png",
+    titleEs: "Envías el contenido",
+    titleEn: "You send the content",
+    descEs:
+      "Manda la imagen o texto sospechoso directamente al bot de Telegram. Sin apps adicionales, sin registro previo.",
+    descEn:
+      "Send the suspicious image or text directly to the Telegram bot. No extra apps, no prior registration.",
+    contextEs: "Formatos soportados",
+    contextEn: "Supported formats",
+    tags: ["JPG / PNG", "Texto", "Cadenas virales"],
+    tagsEn: ["JPG / PNG", "Text", "Viral chains"],
+  },
+  {
+    number: "02",
+    mascot: "/mascot/verum-lupa.png",
+    titleEs: "VERUM analiza",
+    titleEn: "VERUM analyzes",
+    descEs:
+      "Aplica visión forense con Transformada de Fourier y análisis de ruido de sensor para detectar artefactos sintéticos invisibles al ojo humano.",
+    descEn:
+      "Applies forensic vision with Fourier Transform and sensor noise analysis to detect synthetic artifacts invisible to the human eye.",
+    contextEs: "Motores activos",
+    contextEn: "Active engines",
+    tags: ["Fourier DFT", "PRNU", "CNN Two-Stream"],
+    tagsEn: ["Fourier DFT", "PRNU", "CNN Two-Stream"],
+  },
+  {
+    number: "03",
+    mascot: "/mascot/verum-focus.png",
+    titleEs: "Verifica las fuentes",
+    titleEn: "Verifies sources",
+    descEs:
+      "Cruza las entidades extraídas con bases de fact-checking oficiales. Maldita.es, Newtral, Verificat y Google Fact Check en tiempo real.",
+    descEn:
+      "Cross-references extracted entities with official fact-checking databases. Maldita.es, Newtral, Verificat and Google Fact Check in real time.",
+    contextEs: "Fuentes consultadas",
+    contextEn: "Sources checked",
+    tags: ["Maldita.es", "Newtral", "Google Fact Check"],
+    tagsEn: ["Maldita.es", "Newtral", "Google Fact Check"],
+  },
+  {
+    number: "04",
+    mascot: "/mascot/verum-escudo.png",
+    titleEs: "Recibes el veredicto",
+    titleEn: "You get the verdict",
+    descEs:
+      "Respuesta clara, explicada y con fuentes en menos de 15 segundos. Con mapa de calor Grad-CAM si es una imagen manipulada.",
+    descEn:
+      "Clear, explained response with sources in under 15 seconds. With Grad-CAM heatmap if the image is manipulated.",
+    contextEs: "Tiempo de respuesta",
+    contextEn: "Response time",
+    tags: ["< 15s imagen", "< 5s texto", "Grad-CAM"],
+    tagsEn: ["< 15s image", "< 5s text", "Grad-CAM"],
+  },
+];
+
+/* ─── Tag pill — shared between mobile and desktop ───────────────── */
+function TagPill({ label }: { label: string }) {
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        background: "rgba(76, 202, 209, 0.12)",
+        border: "1px solid rgba(76, 202, 209, 0.3)",
+        borderRadius: "9999px",
+        padding: "4px 12px",
+        fontFamily: "var(--font-nunito)",
+        fontSize: "0.85rem",
+        fontWeight: 600,
+        color: "#4CCAD1",
+        WebkitFontSmoothing: "antialiased",
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
+/* ─── Component ──────────────────────────────────────────────────── */
 export default function HowItWorks() {
   const { lang } = useLanguage();
   const t = translations[lang];
-  const stepsData = steps[lang];
+  const isEs = lang === "es";
+
+  const sectionRef = useRef<HTMLDivElement>(null);
   const [activeStep, setActiveStep] = useState(0);
-  const stepRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+  /* useScroll syncs activeStep with scroll position — desktop only */
+  const { scrollYProgress } = useScroll({
+    target: sectionRef,
+    offset: ["start center", "end center"],
+  });
 
   useEffect(() => {
-    const observers: IntersectionObserver[] = [];
-
-    stepRefs.current.forEach((ref, index) => {
-      if (!ref) return;
-      const observer = new IntersectionObserver(
-        ([entry]) => {
-          if (entry.isIntersecting) {
-            setActiveStep(index);
-          }
-        },
-        { threshold: 0.6 }
-      );
-      observer.observe(ref);
-      observers.push(observer);
+    return scrollYProgress.on("change", (v) => {
+      if (v < 0.25) setActiveStep(0);
+      else if (v < 0.5) setActiveStep(1);
+      else if (v < 0.75) setActiveStep(2);
+      else setActiveStep(3);
     });
+  }, [scrollYProgress]);
 
-    return () => observers.forEach((obs) => obs.disconnect());
-  }, [lang]);
+  const activeData = stepsData[activeStep];
 
+  /* ─────────────────────────────────────────────────────────────── */
   return (
-    <section id="how" className="bg-white py-24 md:py-32">
-      <div className="mx-auto max-w-7xl px-6">
-        {/* Header */}
-        <div className="mb-16 text-center md:mb-24">
+    <section
+      id="how"
+      ref={sectionRef}
+      style={{
+        background: "#ffffff",
+        paddingTop: "80px",
+        paddingBottom: "80px",
+        /* Prevent horizontal overflow on narrow screens */
+        overflowX: "hidden",
+      }}
+    >
+      <div
+        style={{
+          maxWidth: "1280px",
+          margin: "0 auto",
+          paddingLeft: "clamp(1rem, 5vw, 1.5rem)",
+          paddingRight: "clamp(1rem, 5vw, 1.5rem)",
+          boxSizing: "border-box",
+          width: "100%",
+        }}
+      >
+
+        {/* ── Header ── */}
+        <div style={{ textAlign: "center", marginBottom: "clamp(3rem, 6vw, 6rem)" }}>
           <motion.span
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
-            className="mb-4 inline-block rounded-full border border-teal bg-teal-light/40 px-4 py-1 font-[var(--font-poppins)] text-xs font-semibold uppercase tracking-widest text-teal"
+            style={{
+              display: "inline-block",
+              marginBottom: "1rem",
+              borderRadius: "9999px",
+              border: "1px solid var(--color-teal)",
+              background: "rgba(191,232,238,0.4)",
+              padding: "0.25rem 1rem",
+              fontFamily: "var(--font-poppins)",
+              fontSize: "0.7rem",
+              fontWeight: 600,
+              letterSpacing: "0.12em",
+              textTransform: "uppercase",
+              color: "var(--color-teal)",
+              WebkitFontSmoothing: "antialiased",
+            }}
           >
             {t.eyebrow}
           </motion.span>
@@ -117,91 +179,336 @@ export default function HowItWorks() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
             transition={{ delay: 0.1 }}
-            className="mt-4 font-[var(--font-poppins)] text-3xl font-bold text-navy md:text-4xl"
+            style={{
+              marginTop: "1rem",
+              fontFamily: "var(--font-poppins)",
+              fontSize: "clamp(1.6rem, 4vw, 2.5rem)",
+              fontWeight: 700,
+              color: "var(--color-navy)",
+              lineHeight: 1.25,
+              WebkitFontSmoothing: "antialiased",
+            }}
           >
             {t.heading}
           </motion.h2>
         </div>
 
-        {/* Desktop: two columns with sticky mascot */}
-        <div className="hidden md:grid md:grid-cols-2 md:gap-16">
-          {/* Left: Steps */}
-          <div>
+        {/* ══════════════════════════════════════════════
+            MOBILE layout  (< 768 px)
+            — Shown by default, hidden on md+
+        ══════════════════════════════════════════════ */}
+        <div className="md:hidden">
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "3.5rem",
+              width: "100%",
+            }}
+          >
             {stepsData.map((step, index) => (
-              <div
-                key={step.num}
-                ref={(el) => { stepRefs.current[index] = el; }}
-                className="relative py-20"
+              <motion.div
+                key={step.number}
+                initial={{ opacity: 0, y: 28 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true, margin: "-60px" }}
+                transition={{ duration: 0.45, delay: index * 0.07 }}
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  width: "100%",
+                  boxSizing: "border-box",
+                }}
               >
-                {/* Decorative number */}
-                <span className="absolute -top-2 left-0 font-[var(--font-poppins)] text-8xl font-bold text-teal-light/60 select-none">
-                  {step.num}
-                </span>
-                <div className="relative">
-                  <h3 className="mb-3 font-[var(--font-poppins)] text-3xl font-bold text-navy">
-                    {step.title}
-                  </h3>
-                  <p className="max-w-md text-lg leading-relaxed text-text-secondary">
-                    {step.desc}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Right: Sticky mascot */}
-          <div className="flex items-start justify-center">
-            <div className="sticky top-[120px] flex items-center justify-center">
-              <AnimatePresence mode="wait">
-                <motion.div
-                  key={stepsData[activeStep].mascot}
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  transition={{ duration: 0.3 }}
+                {/* Mascot — fixed px dimensions, no fill, avoids Safari
+                    positioning bugs with position:relative + fill */}
+                <div
+                  style={{
+                    width: "180px",
+                    height: "180px",
+                    position: "relative",
+                    marginBottom: "1.25rem",
+                    flexShrink: 0,
+                  }}
                 >
                   <Image
-                    src={stepsData[activeStep].mascot}
-                    alt={`VERUM - ${stepsData[activeStep].title}`}
-                    width={380}
-                    height={380}
-                    className="object-contain"
+                    src={step.mascot}
+                    alt={`VERUM — ${isEs ? step.titleEs : step.titleEn}`}
+                    fill
+                    sizes="180px"
+                    style={{ objectFit: "contain" }}
+                    className="animate-float"
+                  />
+                </div>
+
+                {/* Context mini-card */}
+                <div
+                  style={{
+                    width: "100%",
+                    maxWidth: "400px",
+                    boxSizing: "border-box",
+                    background: "#F7F8FA",
+                    borderRadius: "16px",
+                    border: "1px solid #E6E8ED",
+                    padding: "14px 18px",
+                    marginBottom: "1rem",
+                  }}
+                >
+                  <p
+                    style={{
+                      fontFamily: "var(--font-nunito)",
+                      fontSize: "0.68rem",
+                      fontWeight: 600,
+                      color: "var(--color-text-secondary)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                      marginBottom: "10px",
+                      WebkitFontSmoothing: "antialiased",
+                    }}
+                  >
+                    {isEs ? step.contextEs : step.contextEn}
+                  </p>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: "6px",
+                      justifyContent: "center",
+                    }}
+                  >
+                    {(isEs ? step.tags : step.tagsEn).map((tag) => (
+                      <TagPill key={tag} label={tag} />
+                    ))}
+                  </div>
+                </div>
+
+                {/* Step number (decorative) */}
+                <div
+                  style={{
+                    fontFamily: "var(--font-poppins)",
+                    fontSize: "clamp(2.5rem, 10vw, 3.5rem)",
+                    fontWeight: 700,
+                    color: "#BFE8EE",
+                    lineHeight: 1,
+                    marginBottom: "-10px",
+                    userSelect: "none",
+                    WebkitUserSelect: "none",
+                  }}
+                >
+                  {step.number}
+                </div>
+
+                {/* Title */}
+                <h3
+                  style={{
+                    fontFamily: "var(--font-poppins)",
+                    fontSize: "clamp(1.25rem, 5vw, 1.5rem)",
+                    fontWeight: 700,
+                    color: "var(--color-navy)",
+                    marginTop: "0.5rem",
+                    marginBottom: "0.6rem",
+                    textAlign: "center",
+                    WebkitFontSmoothing: "antialiased",
+                  }}
+                >
+                  {isEs ? step.titleEs : step.titleEn}
+                </h3>
+
+                {/* Description */}
+                <p
+                  style={{
+                    fontFamily: "var(--font-nunito)",
+                    fontSize: "clamp(0.9rem, 3.5vw, 1rem)",
+                    lineHeight: 1.7,
+                    color: "var(--color-text-secondary)",
+                    maxWidth: "360px",
+                    textAlign: "center",
+                    WebkitFontSmoothing: "antialiased",
+                    margin: 0,
+                  }}
+                >
+                  {isEs ? step.descEs : step.descEn}
+                </p>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+
+        {/* ══════════════════════════════════════════════
+            DESKTOP layout  (≥ 768 px)
+            — Hidden on mobile, shown on md+
+        ══════════════════════════════════════════════ */}
+        <div
+          className="hidden md:grid"
+          style={{
+            gridTemplateColumns: "1fr 1fr",
+            gap: "4rem",
+            alignItems: "start",
+          }}
+        >
+          {/* Left column — Steps */}
+          <div>
+            {stepsData.map((step, index) => {
+              const isActive = activeStep === index;
+              return (
+                <motion.div
+                  key={step.number}
+                  initial={{ opacity: 0, x: -20 }}
+                  whileInView={{ opacity: 1, x: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ duration: 0.5, delay: index * 0.1 }}
+                  style={{
+                    position: "relative",
+                    padding: "80px 0 80px 28px",
+                    boxSizing: "border-box",
+                  }}
+                >
+                  {/* Active indicator bar */}
+                  <div
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      top: 0,
+                      bottom: 0,
+                      width: "3px",
+                      borderRadius: "999px",
+                      background: isActive ? "var(--color-teal)" : "#E6E8ED",
+                      transition: "background 0.3s ease",
+                    }}
+                  />
+
+                  {/* Decorative number */}
+                  <div
+                    style={{
+                      fontFamily: "var(--font-poppins)",
+                      fontSize: "5.5rem",
+                      fontWeight: 700,
+                      color: "#BFE8EE",
+                      lineHeight: 1,
+                      marginBottom: "-16px",
+                      userSelect: "none",
+                      WebkitUserSelect: "none",
+                    }}
+                  >
+                    {step.number}
+                  </div>
+
+                  {/* Title */}
+                  <h3
+                    style={{
+                      fontFamily: "var(--font-poppins)",
+                      fontSize: "1.875rem",
+                      fontWeight: 700,
+                      color: "var(--color-navy)",
+                      marginBottom: "12px",
+                      position: "relative",
+                      WebkitFontSmoothing: "antialiased",
+                    }}
+                  >
+                    {isEs ? step.titleEs : step.titleEn}
+                  </h3>
+
+                  {/* Description */}
+                  <p
+                    style={{
+                      fontFamily: "var(--font-nunito)",
+                      fontSize: "1.125rem",
+                      lineHeight: 1.7,
+                      color: "var(--color-text-secondary)",
+                      maxWidth: "480px",
+                      margin: 0,
+                      WebkitFontSmoothing: "antialiased",
+                    }}
+                  >
+                    {isEs ? step.descEs : step.descEn}
+                  </p>
+                </motion.div>
+              );
+            })}
+          </div>
+
+          {/* Right column — Sticky mascot + context card */}
+          <div
+            style={{
+              position: "sticky",
+              top: "120px",
+              height: "fit-content",
+              display: "flex",
+              flexDirection: "column",
+              gap: "24px",
+            }}
+          >
+            {/* Mascot with AnimatePresence */}
+            <div
+              style={{
+                position: "relative",
+                height: "320px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={activeData.mascot}
+                  initial={{ opacity: 0, scale: 0.92, y: 10 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.92, y: -10 }}
+                  transition={{ duration: 0.25, ease: "easeOut" }}
+                  style={{ position: "relative", width: "280px", height: "280px" }}
+                >
+                  <Image
+                    src={activeData.mascot}
+                    alt={`VERUM — ${isEs ? activeData.titleEs : activeData.titleEn}`}
+                    fill
+                    sizes="280px"
+                    style={{ objectFit: "contain" }}
+                    className="animate-float"
                   />
                 </motion.div>
               </AnimatePresence>
             </div>
+
+            {/* Context mini-card with AnimatePresence */}
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={activeStep}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ duration: 0.2 }}
+                style={{
+                  background: "#F7F8FA",
+                  borderRadius: "16px",
+                  border: "1px solid #E6E8ED",
+                  padding: "20px 24px",
+                }}
+              >
+                <p
+                  style={{
+                    fontFamily: "var(--font-nunito)",
+                    fontSize: "0.75rem",
+                    fontWeight: 600,
+                    color: "var(--color-text-secondary)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.08em",
+                    marginBottom: "12px",
+                    WebkitFontSmoothing: "antialiased",
+                  }}
+                >
+                  {isEs ? activeData.contextEs : activeData.contextEn}
+                </p>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                  {(isEs ? activeData.tags : activeData.tagsEn).map((tag) => (
+                    <TagPill key={tag} label={tag} />
+                  ))}
+                </div>
+              </motion.div>
+            </AnimatePresence>
           </div>
         </div>
 
-        {/* Mobile: single column with inline mascot */}
-        <div className="space-y-16 md:hidden">
-          {stepsData.map((step) => (
-            <motion.div
-              key={step.num}
-              initial={{ opacity: 0, y: 30 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              className="text-center"
-            >
-              <Image
-                src={step.mascot}
-                alt={`VERUM - ${step.title}`}
-                width={200}
-                height={200}
-                className="mx-auto mb-6 object-contain"
-              />
-              <span className="font-[var(--font-poppins)] text-5xl font-bold text-teal-light/60">
-                {step.num}
-              </span>
-              <h3 className="mt-2 font-[var(--font-poppins)] text-2xl font-bold text-navy">
-                {step.title}
-              </h3>
-              <p className="mt-3 text-base leading-relaxed text-text-secondary">
-                {step.desc}
-              </p>
-            </motion.div>
-          ))}
-        </div>
       </div>
     </section>
   );
