@@ -490,6 +490,64 @@ def _extract_verdict_from_llm_output(text: str) -> str | None:
     return None
 
 
+_NO_INFO_PHRASES = (
+    "no tengo información",
+    "no menciona",
+    "no puedo confirmar",
+    "no hay información",
+    "no se menciona",
+    "sin información",
+    # English equivalents
+    "no information",
+    "cannot confirm",
+    "can't confirm",
+    "no relevant",
+)
+
+
+def _is_no_info_response(text: str) -> bool:
+    """Return True if the LLM summary indicates it could not find relevant info."""
+    lower = text.lower()
+    return any(phrase in lower for phrase in _NO_INFO_PHRASES)
+
+
+# Generic fallback message shown when the LLM had no verdict AND no relevant info.
+NO_INFO_SUMMARY = (
+    "No encontré información verificada sobre esto.\n\n"
+    "No tenemos esta noticia en nuestra base de datos ni en fuentes de "
+    "fact-checking. Esto no significa que sea falsa — simplemente no hay registros.\n\n"
+    "💡 Comprueba en: maldita.es · newtral.es · snopes.com"
+)
+
+
+def resolve_final_verdict(result: NLPResult) -> NLPResult:
+    """Decide the final verdict + summary from an LLM-synthesised NLPResult.
+
+    Single source of truth shared by the worker (production) and the eval
+    script, so both behave identically.
+
+    Order matters:
+      1. FIRST try to extract a clear verdict from the LLM output. A valid
+         FALSO/VERDADERO/NO VERIFICADO must win even if the explanation also
+         contains a phrase like "no puedo confirmar el dato exacto".
+      2. ONLY if the LLM gave no clear verdict AND its text signals it had no
+         relevant information, degrade gracefully to UNVERIFIED with a helpful
+         generic message.
+
+    Mutates and returns ``result``.
+    """
+    llm_verdict = _extract_verdict_from_llm_output(result.summary)
+    if llm_verdict is not None:
+        result.verdict = llm_verdict
+        return result
+
+    if _is_no_info_response(result.summary):
+        result.verdict = "UNVERIFIED"
+        result.summary = NO_INFO_SUMMARY
+
+    return result
+
+
 # ── Private helpers ───────────────────────────────────────────────────────────
 
 def _topic_overlap_score(entities: list[str], article_text: str) -> float:

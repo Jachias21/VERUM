@@ -55,7 +55,7 @@ from services.worker_nlp.app.ner import extract_entities, is_gibberish  # noqa: 
 from services.worker_nlp.app.rag import (  # noqa: E402
     hybrid_search,
     synthesize_verdict,
-    _extract_verdict_from_llm_output,
+    resolve_final_verdict,
     _topic_overlap_score,
 )
 
@@ -97,9 +97,9 @@ async def _run_one(example: dict[str, Any]) -> dict[str, Any]:
 
         rag_result = await synthesize_verdict(rag_result, text)
 
-        # LLM verdict override (same logic as worker.py)
-        llm_verdict = _extract_verdict_from_llm_output(rag_result.summary)
-        predicted = llm_verdict if llm_verdict is not None else rag_result.verdict
+        # Shared decision logic — identical to worker.py (production parity)
+        rag_result = resolve_final_verdict(rag_result)
+        predicted = rag_result.verdict
 
         latency_ms = int((time.monotonic() - t0) * 1000)
         return {

@@ -80,6 +80,15 @@ def _sent_text(mock_send: AsyncMock) -> str:
     return mock_send.call_args.kwargs["text"]
 
 
+def _make_synth_mock(summary: str) -> AsyncMock:
+    """Return an AsyncMock for synthesize_verdict that sets result.summary in-place
+    and returns the modified NLPResult — matching the real function's API."""
+    async def _side_effect(result, text):  # noqa: ANN001
+        result.summary = summary
+        return result
+    return AsyncMock(side_effect=_side_effect)
+
+
 # ── Test 1: high-confidence L1 Qdrant hit → FAKE verdict ─────────────────────
 
 @pytest.mark.asyncio
@@ -106,7 +115,7 @@ async def test_full_pipeline_fake_verdict():
         patch("services.worker_nlp.app.rag._search_qdrant", new=AsyncMock(return_value=qdrant_hit)),
         patch(
             "services.worker_nlp.app.worker.synthesize_verdict",
-            new=AsyncMock(return_value="VEREDICTO: FALSO — el artículo lo confirma."),
+            new=_make_synth_mock("VEREDICTO: FALSO — el artículo lo confirma."),
         ),
         patch("services.worker_nlp.app.worker.set_cached_verdict", new=AsyncMock()),
         patch("services.worker_nlp.app.worker.get_mongo_db", return_value=_make_mongo_mock()),
@@ -142,7 +151,7 @@ async def test_full_pipeline_unverified_no_hits():
         patch("services.worker_nlp.app.rag._search_gnews", new=AsyncMock(return_value=[])),
         patch(
             "services.worker_nlp.app.worker.synthesize_verdict",
-            new=AsyncMock(return_value="No tengo información sobre esta afirmación."),
+            new=_make_synth_mock("No tengo información sobre esta afirmación."),
         ),
         patch("services.worker_nlp.app.worker.set_cached_verdict", new=AsyncMock()),
         patch("services.worker_nlp.app.worker.get_mongo_db", return_value=_make_mongo_mock()),
@@ -307,7 +316,7 @@ async def test_pipeline_malformed_llm_keeps_rag_verdict():
         patch(
             "services.worker_nlp.app.worker.synthesize_verdict",
             # Free-form text with no VEREDICTO: pattern → _extract_verdict_from_llm_output returns None
-            new=AsyncMock(return_value="No tengo suficiente contexto para evaluar esta afirmación de forma precisa."),
+            new=_make_synth_mock("No tengo suficiente contexto para evaluar esta afirmación de forma precisa."),
         ),
         patch("services.worker_nlp.app.worker.set_cached_verdict", new=AsyncMock()),
         patch("services.worker_nlp.app.worker.get_mongo_db", return_value=_make_mongo_mock()),
@@ -351,7 +360,7 @@ async def test_pipeline_mongodb_failure_still_replies_telegram():
         patch("services.worker_nlp.app.rag._search_qdrant", new=AsyncMock(return_value=qdrant_hit)),
         patch(
             "services.worker_nlp.app.worker.synthesize_verdict",
-            new=AsyncMock(return_value="VEREDICTO: FALSO — confirmado por las fuentes."),
+            new=_make_synth_mock("VEREDICTO: FALSO — confirmado por las fuentes."),
         ),
         patch("services.worker_nlp.app.worker.set_cached_verdict", new=AsyncMock()),
         patch("services.worker_nlp.app.worker.get_mongo_db", return_value=_make_mongo_mock_failing()),
@@ -390,7 +399,7 @@ async def test_pipeline_urls_emojis_only_degrades_to_unverified():
         patch("services.worker_nlp.app.rag._search_gnews", new=AsyncMock(return_value=[])),
         patch(
             "services.worker_nlp.app.worker.synthesize_verdict",
-            new=AsyncMock(return_value="No tengo información sobre esta afirmación."),
+            new=_make_synth_mock("No tengo información sobre esta afirmación."),
         ),
         patch("services.worker_nlp.app.worker.set_cached_verdict", new=AsyncMock()),
         patch("services.worker_nlp.app.worker.get_mongo_db", return_value=_make_mongo_mock()),
@@ -445,7 +454,12 @@ async def test_pipeline_l2_topic_mismatch_drops_source():
         patch("services.worker_nlp.app.rag._search_gnews", new=AsyncMock(return_value=[])),
         patch(
             "services.worker_nlp.app.worker.synthesize_verdict",
-            new=AsyncMock(return_value="VEREDICTO: NO VERIFICADO — no hay información relevante."),
+            # "NO VERIFICADO" → _extract_verdict_from_llm_output returns UNVERIFIED.
+            # Summary must NOT contain no-info phrases so the Telegram formatter
+            # takes the UNVERIFIED+no-source branch that appends maldita.es.
+            # (Old tests used "no hay información relevante" which triggered the
+            # Telegram _is_no_info_response check and bypassed the source-line.)
+            new=_make_synth_mock("VEREDICTO: NO VERIFICADO — el artículo recuperado trata sobre fútbol y no guarda relación con la afirmación evaluada."),
         ),
         patch("services.worker_nlp.app.worker.set_cached_verdict", new=AsyncMock()),
         patch("services.worker_nlp.app.worker.get_mongo_db", return_value=_make_mongo_mock()),
