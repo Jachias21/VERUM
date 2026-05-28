@@ -45,6 +45,7 @@ models/vision/weights/*.safetensors
 data/raw/
 data/processed/
 data/knowledge_base/
+data/custom/
 !data/**/.gitkeep
 *.csv
 *.parquet
@@ -86,8 +87,3 @@ reports/
 
 VERUM_TFM.md
 CLAUDE.md
-
-
-
-# -- para el pc tema versiones --
-pyproject.toml
