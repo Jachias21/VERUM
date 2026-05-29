@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import logging
 import uuid
+
 from pathlib import Path
 from typing import Optional
 
@@ -209,6 +210,16 @@ def _write_blank_png(path: Path) -> None:
 
 async def generate_heatmap(image_bytes: bytes, query_id: uuid.UUID) -> str | None:
     """
+    Apply Grad-CAM on the spatial branch of the CNN and overlay it on the
+    original image.
+
+    Returns the file path of the saved heatmap PNG, or None if unavailable.
+
+    TODO:
+      - Load the PyTorch model (spatial branch only, NOT the ONNX export).
+      - Use pytorch_grad_cam.GradCAM targeting the last conv layer.
+      - Blend the activation map with the original RGB image.
+      - Save to /tmp/heatmap_{query_id}.png and return the path.
     Apply Grad-CAM++ on the spatial branch of TwoStreamCNN and overlay the
     activation map on the original RGB image.
 

@@ -45,23 +45,22 @@ RSS_FEEDS = [
     "https://maldita.es/feed/",
     "https://newtral.es/feed/",
     "https://verificat.cat/feed/",
-    "https://factual.afp.com/list/es/rss.xml",
+    "https://factual.afp.com/list/es/rss.xml",  # possibly down — keep for retry
     "https://www.newtral.es/area/fast-forward/feed/",
     "https://hechosdehoy.com/feed/",
     # ── Latin-American fact-checkers ────────────────────────────────
-    "https://chequeado.com/feed/",
-    "https://colombiacheck.com/feed",
+    "https://chequeado.com/feed/",          # possibly down — keep for retry
+    "https://colombiacheck.com/feed",       # possibly down — keep for retry
     "https://factchequeado.com/feed/",
     "https://lasillavacia.com/feed",
-    "https://www.pagina12.com.ar/rss/secciones/el-planeta/notas",
+    "https://www.pagina12.com.ar/rss/secciones/el-planeta/notas",  # possibly down — keep for retry
     # ── English fact-checkers (high quality) ────────────────────────
     "https://www.snopes.com/feed/",
     "https://www.factcheck.org/feed/",
     "https://fullfact.org/feed/",
-    "https://apnews.com/hub/fact-checking/feed",
-    "https://www.politifact.com/rss/all.rss/",
-    "https://www.reuters.com/fact-check/rss.xml",
-    "https://factuel.afp.com/list/en/rss.xml",
+    "https://apnews.com/hub/fact-checking/feed",  # possibly down — keep for retry
+    "https://www.politifact.com/rss/all.rss/",    # possibly down — keep for retry
+    "https://factuel.afp.com/list/en/rss.xml",    # possibly down — keep for retry
     # ── Anti-disinformation organisations ─────────────────────────
     "https://www.stopfake.org/en/feed/",
     "https://euvsdisinfo.eu/feed/",
@@ -71,20 +70,110 @@ RSS_FEEDS = [
     "https://www.20minutos.es/rss/",
     "https://www.efeverde.com/feed/",
     # ── General quality news (broad coverage) ─────────────────────
-    "https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/section/internacional/portada",
-    "https://www.lavanguardia.com/mvc/feed/rss/vida/salud",
+    "https://www.lavanguardia.com/mvc/feed/rss/vida/salud",  # possibly down — keep for retry
     "https://www.elmundo.es/rss/espana.xml",
-    "https://www.rtve.es/api/noticias.rss",
-    "https://www.infobae.com/feeds/rss/",
+    "https://www.rtve.es/api/noticias.rss",         # possibly down — keep for retry
+    "https://www.infobae.com/feeds/rss/",           # possibly down — keep for retry
     "https://www.clarin.com/rss/lo-ultimo/",
+    # ── Official institutional sources (Spain) ─────────────────────
+    "https://www.lamoncloa.gob.es/serviciosdeprensa/notasprensa/Paginas/index.aspx?format=rss",  # possibly down — keep for retry
+    "https://www.boe.es/rss/canal.php?c=ultimas_disposiciones",          # possibly down — keep for retry
+    "https://www.sanidad.gob.es/rss/notasPrensa.do",                     # possibly down — keep for retry
+    "https://www.educacionyfp.gob.es/prensa/actualidad.rss",             # possibly down — keep for retry
+    # ── Official institutional sources (international) ─────────────
+    "https://www.un.org/feed/subscribe/en/rss/category/un-news/feed",  # possibly down — keep for retry
+    "https://www.who.int/rss-feeds/news-english.xml",
+    "https://www.esa.int/rssfeed/Our_Activities",
+    "https://ec.europa.eu/commission/presscorner/api/rss?language=es",
+    # ── General news agencies (broad factual coverage) ────────────
+    "https://www.efe.com/efe/espana/1/rss",         # possibly down — keep for retry
+    "https://feeds.bbci.co.uk/news/world/rss.xml",  # possibly down — keep for retry
+    "https://apnews.com/index.rss",                 # possibly down — keep for retry
+    "https://www.dw.com/es/top-stories/s-30684/rss",  # possibly down — keep for retry
+    # ── Science & health (peer-reviewed coverage) ─────────────────
+    "https://www.nature.com/nature.rss",
+    "https://www.nih.gov/news-events/news-releases/feed",  # possibly down — keep for retry
+    "https://www.cdc.gov/media/rss/index.htm",             # possibly down — keep for retry
+    # ── Economy (institutional and quality general) ───────────────
+    "https://www.bde.es/rss/notas_es.xml",         # possibly down — keep for retry
+    "https://cincodias.elpais.com/rss/cincodias/portada.xml",
+    "https://www.expansion.com/rss/portada.xml",
 ]
 
-# Publishers that exclusively publish fact-checks / debunks → default verdict FAKE
-_FACTCHECKER_PUBLISHERS = [
-    "maldita", "newtral", "verificat", "afp factual", "fact check", "reuters",
-    "snopes", "fullfact", "factcheck", "politifact", "chequeado", "colombiacheck",
-    "factchequeado", "stopfake", "euvsdisinfo", "hechosdehoy",
-]
+# Domains of publishers that publish factual information from institutional/official sources.
+# Match is performed against the netloc of the feed URL (or article URL for GNews),
+# which is deterministic — unlike feed titles, which vary between publishers.
+# Articles from these domains without explicit FAKE keywords default to REAL.
+_INSTITUTIONAL_DOMAINS = {
+    # Spain — institutional
+    "lamoncloa.gob.es",
+    "boe.es",
+    "ine.es",
+    "sanidad.gob.es",
+    "educacionyfp.gob.es",
+    "exteriores.gob.es",
+    "bde.es",
+    # International — institutional
+    "un.org",
+    "who.int",
+    "esa.int",
+    "ecb.europa.eu",
+    "ec.europa.eu",
+    "nih.gov",
+    "cdc.gov",
+    # News agencies (broad factual coverage)
+    "efe.com",
+    "efeverde.com",      # EFE Verde — environmental section of Spain's national agency
+    "reuters.com",
+    "bbc.com",
+    "bbc.co.uk",
+    "bbci.co.uk",
+    "apnews.com",
+    "dw.com",
+    # Science publishers (peer-reviewed coverage)
+    "nature.com",
+    "science.org",
+    "sciencemag.org",
+    # Quality economy outlets
+    "cincodias.elpais.com",
+    "expansion.com",
+    # Spain — reference quality dailies
+    "elpais.com",        # El País — Spain's newspaper of record
+    "elmundo.es",        # El Mundo — major Spanish daily
+    "abc.es",            # ABC — major Spanish daily
+    "lavanguardia.com",  # La Vanguardia — major Catalan/Spanish daily
+    "20minutos.es",      # 20 Minutos — widely distributed free daily
+    "rtve.es",           # RTVE — Spain's public broadcaster
+    # Latin America — reference quality dailies
+    "clarin.com",        # Clarín — Argentina's most-read newspaper
+    "infobae.com",       # Infobae — major Latin-American digital outlet
+    "pagina12.com.ar",   # Página 12 — Argentine daily of record
+    "lanacion.com.ar",   # La Nación — Argentina's newspaper of record
+}
+
+# Domains of fact-checking publishers. Match against feed URL netloc.
+# Articles from these without explicit FAKE/REAL keywords default to UNVERIFIED
+# (their content may be context/analysis without a verdict).
+_FACTCHECKER_DOMAINS = {
+    "maldita.es",
+    "newtral.es",
+    "verificat.cat",
+    "factual.afp.com",
+    "factuel.afp.com",
+    "hechosdehoy.com",
+    "chequeado.com",
+    "colombiacheck.com",
+    "factchequeado.com",
+    "lasillavacia.com",
+    "snopes.com",
+    "factcheck.org",
+    "fullfact.org",
+    "politifact.com",
+    "stopfake.org",
+    "euvsdisinfo.eu",
+    "aosfatos.org",
+    "ecuadorchequea.com",
+}
 
 # Dense vector dimension for BAAI/bge-m3
 DENSE_DIM = 1024
@@ -100,24 +189,72 @@ _REAL_KEYWORDS = [
 ]
 
 
-def _infer_verdict_from_entry(entry: dict, publisher: str = "") -> str:
-    """Best-effort verdict using title, tags, and summary text before storing in Qdrant."""
+from urllib.parse import urlparse
+
+
+def _domain_class(source_url: str) -> str:
+    """Classify a URL by publisher domain. Returns 'institutional', 'factchecker', or 'unknown'."""
+    if not source_url:
+        return "unknown"
+    try:
+        netloc = urlparse(source_url).netloc.lower()
+    except Exception:
+        return "unknown"
+    if not netloc:
+        return "unknown"
+    # Strip leading 'www.' for matching
+    if netloc.startswith("www."):
+        netloc = netloc[4:]
+    # Exact match or any subdomain of a known domain (e.g. 'feeds.reuters.com' matches 'reuters.com')
+    for inst in _INSTITUTIONAL_DOMAINS:
+        if netloc == inst or netloc.endswith("." + inst):
+            return "institutional"
+    for fc in _FACTCHECKER_DOMAINS:
+        if netloc == fc or netloc.endswith("." + fc):
+            return "factchecker"
+    return "unknown"
+
+
+def _infer_verdict_from_entry(
+    entry: dict,
+    publisher: str = "",
+    source_url: str = "",
+) -> str:
+    """Best-effort verdict using title, tags, summary text, and publisher domain.
+
+    Decision flow:
+      1. Lexical signals dominate: explicit FAKE/REAL keywords in text always win.
+      2. If both kinds of signals appear → UNVERIFIED (ambiguous).
+      3. Without explicit signals, fall back to publisher domain class:
+         - institutional → REAL (editorial mandate is verified facts).
+         - factchecker → UNVERIFIED (content may be context, not always a verdict).
+         - unknown → UNVERIFIED (safe default).
+
+    The `publisher` parameter is kept for backward compatibility but is no
+    longer used for classification — `source_url` (passed by the caller from
+    the feed/article URL) is the authoritative signal.
+    """
     tags = " ".join(t.get("term", "") for t in entry.get("tags", [])).lower()
     title = entry.get("title", "").lower()
     raw_summary = entry.get("summary", "")
     clean_summary = BeautifulSoup(raw_summary, "html.parser").get_text(separator=" ", strip=True).lower()
     combined = " ".join([tags, title, clean_summary])
 
-    if any(w in combined for w in _FAKE_KEYWORDS):
+    has_fake = any(w in combined for w in _FAKE_KEYWORDS)
+    has_real = any(w in combined for w in _REAL_KEYWORDS)
+
+    if has_fake and has_real:
+        return "UNVERIFIED"
+    if has_fake:
         return "FAKE"
-    if any(w in combined for w in _REAL_KEYWORDS):
+    if has_real:
         return "REAL"
 
-    # Heuristic: known fact-checker publishers only publish debunks → default FAKE
-    pub_lower = publisher.lower()
-    if any(fc in pub_lower for fc in _FACTCHECKER_PUBLISHERS):
-        return "FAKE"
-
+    domain_class = _domain_class(source_url)
+    if domain_class == "institutional":
+        return "REAL"
+    if domain_class == "factchecker":
+        return "UNVERIFIED"
     return "UNVERIFIED"
 
 
@@ -167,7 +304,7 @@ def extract_from_gnews() -> list[dict]:
                 "url": link,
                 "publisher": publisher,
                 "published": item.get("publishedAt", ""),
-                "verdict": _infer_verdict_from_entry(synthetic_entry, publisher),
+                "verdict": _infer_verdict_from_entry(synthetic_entry, publisher=publisher, source_url=link),
             }
 
     return list(seen.values())
@@ -209,7 +346,7 @@ def extract() -> list[dict]:
                     "url": entry.get("link", ""),
                     "publisher": publisher,
                     "published": entry.get("published", ""),
-                    "verdict": _infer_verdict_from_entry(entry, publisher),
+                    "verdict": _infer_verdict_from_entry(entry, publisher=publisher, source_url=url),
                 }
                 raw_count += 1
                 if _validate_article(article):

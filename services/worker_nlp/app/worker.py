@@ -24,7 +24,7 @@ from shared.schemas import TextTask, NLPResult, QueryLog
 from app.cache import get_cached_verdict, set_cached_verdict
 from app.metrics import nlp_processing_seconds
 from app.ner import extract_entities, is_gibberish
-from app.rag import hybrid_search, synthesize_verdict, _extract_verdict_from_llm_output
+from app.rag import hybrid_search, synthesize_verdict, resolve_final_verdict, _is_no_info_response
 
 load_dotenv()
 
@@ -35,27 +35,6 @@ logging.basicConfig(
     handlers=[logging.StreamHandler()],
     force=True,
 )
-
-
-_NO_INFO_PHRASES = (
-    "no tengo información",
-    "no menciona",
-    "no puedo confirmar",
-    "no hay información",
-    "no se menciona",
-    "sin información",
-    # English equivalents
-    "no information",
-    "cannot confirm",
-    "can't confirm",
-    "no relevant",
-)
-
-
-def _is_no_info_response(text: str) -> bool:
-    """Return True if the LLM summary indicates it could not find relevant info."""
-    lower = text.lower()
-    return any(phrase in lower for phrase in _NO_INFO_PHRASES)
 
 
 def _sanitize_summary(summary: str) -> str:
@@ -180,27 +159,15 @@ async def process(message: aio_pika.abc.AbstractIncomingMessage) -> None:
                     hybrid_search(task.query_id, task.text, entities),
                     timeout=80.0,
                 )
-                result.summary = await synthesize_verdict(task.text, result)
+                result = await synthesize_verdict(result, task.text)
 
-                # Override reply when the LLM had no relevant context to work with
-                _no_info_override = _is_no_info_response(result.summary)
-                if _no_info_override:
-                    result.verdict = "UNVERIFIED"
-                    result.summary = (
-                        "No encontré información verificada sobre esto.\n\n"
-                        "No tenemos esta noticia en nuestra base de datos ni en fuentes de "
-                        "fact-checking. Esto no significa que sea falsa — simplemente no hay registros.\n\n"
-                        "💡 Comprueba en: maldita.es · newtral.es · snopes.com"
-                    )
-
-                # Override verdict with LLM output when it follows the expected format
-                llm_verdict = _extract_verdict_from_llm_output(result.summary)
-                if llm_verdict is not None:
+                _prev_verdict = result.verdict
+                result = resolve_final_verdict(result)
+                if result.verdict != _prev_verdict:
                     logger.info(
-                        "process: LLM overriding RAG verdict %r → %r for query_id=%s",
-                        result.verdict, llm_verdict, task.query_id,
+                        "process: verdict resolved %r → %r for query_id=%s",
+                        _prev_verdict, result.verdict, task.query_id,
                     )
-                    result.verdict = llm_verdict
 
                 elapsed_ms = int((time.monotonic() - start) * 1000)
                 await set_cached_verdict(text_hash, result)
