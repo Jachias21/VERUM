@@ -34,14 +34,14 @@ Todo el procesamiento ocurre en servidores propios. Ningún dato del usuario sal
 
 ```
                         ┌─────────────────────────────────────┐
-                        │           Usuario (Telegram)         │
+                        │           Usuario (Telegram)        │
                         └──────────────┬──────────────────────┘
                                        │ envía imagen o texto
                                        ▼
                         ┌─────────────────────────────────────┐
-                        │         Gateway  (FastAPI)           │
-                        │   /webhook  ──►  router.py           │
-                        │   Responde 200 OK de inmediato       │
+                        │         Gateway  (FastAPI)          │
+                        │   /webhook  ──►  router.py          │
+                        │   Responde 200 OK de inmediato      │
                         └───────────┬─────────────────────────┘
                                     │ publica tarea en cola
                     ┌───────────────┴───────────────┐
@@ -50,30 +50,30 @@ Todo el procesamiento ocurre en servidores propios. Ningún dato del usuario sal
                     │                               │
                     ▼                               ▼
      ┌──────────────────────────┐    ┌──────────────────────────┐
-     │     worker_vision        │    │      worker_nlp           │
-     │                          │    │                           │
-     │  1. Descarga imagen      │    │  1. SpaCy NER             │
-     │  2. RGB → YCbCr → DFT   │    │  2. Búsqueda Qdrant       │
-     │  3. CNN Two-Stream ONNX  │    │  3. Fallback Google API   │
-     │  4. Grad-CAM heatmap     │    │  4. Síntesis con Ollama   │
+     │     worker_vision        │    │      worker_nlp          │
+     │                          │    │                          │
+     │  1. Descarga imagen      │    │  1. SpaCy NER            │
+     │  2. RGB → YCbCr → DFT    │    │  2. Búsqueda Qdrant      │
+     │  3. CNN Two-Stream ONNX  │    │  3. Fallback Google API  │
+     │  4. Grad-CAM heatmap     │    │  4. Síntesis con Ollama  │
      └──────────┬───────────────┘    └────────────┬─────────────┘
-                │                                  │
-                └──────────────┬───────────────────┘
+                │                                 │
+                └──────────────┬──────────────────┘
                                │ guarda metadatos
                                ▼
                     ┌─────────────────────┐
-                    │      MongoDB         │  ◄── Dashboard (Streamlit)
-                    │  colección: queries  │
+                    │      MongoDB        │  ◄── Dashboard (Streamlit)
+                    │  colección: queries │
                     └─────────────────────┘
 
                     ┌─────────────────────┐
-                    │       Qdrant         │  ◄── ETL pipeline (cron)
-                    │  knowledge base      │
+                    │       Qdrant        │  ◄── ETL pipeline (cron)
+                    │  knowledge base     │
                     └─────────────────────┘
 
                     ┌─────────────────────┐
-                    │       Ollama         │
-                    │  Llama 3.2 / Qwen    │
+                    │       Ollama        │
+                    │  Llama 3.2 / Qwen   │
                     └─────────────────────┘
 ```
 
@@ -116,7 +116,7 @@ VERUM/
 ├── docker-compose.yml         # Orquestación completa de producción
 ├── docker-compose.dev.yml     # Overrides para desarrollo (hot-reload, bind mounts)
 ├── .env.example               # Plantilla de variables de entorno
-└── CLAUDE.md                  # Guía para Claude Code
+└── Makefile                    # Comandos útiles (registro webhook, tests, etc.)
 ```
 
 ---
