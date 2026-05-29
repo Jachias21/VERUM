@@ -16,6 +16,7 @@ Design decisions
 """
 from __future__ import annotations
 
+import os
 import logging
 import uuid
 from pathlib import Path
@@ -57,7 +58,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-_CHECKPOINT = Path("models/vision/weights/verum_cnn.pt") # --> esto es relativo al Docker
+_CHECKPOINT = Path(os.getenv("XAI_CHECKPOINT_PATH", "models/vision/weights/verum_cnn_best.pt")) # --> esto es relativo al Docker
 _IMG_SIZE = 224
 _IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 _IMAGENET_STD  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
