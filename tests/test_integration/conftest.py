@@ -1,23 +1,24 @@
 """
-pytest configuration for NLP integration tests.
+Configuracón de pytest para los tests de integración NLP.
 
-Registers ``app.*`` as aliases for ``services.worker_nlp.app.*`` in
-``sys.modules`` *before* each integration test module runs.  This ensures:
+Registra ``app.*`` como alias de ``services.worker_nlp.app.*`` en
+``sys.modules`` *antes* de que se ejecute cada módulo de test de integración.
+Esto garantiza:
 
-1. worker.py's bare ``from app.xxx import ...`` imports (designed for Docker
-   where WORKDIR=/app == services/worker_nlp/app) succeed when running from
-   the project root.
+1. Que las importaciones directas ``from app.xxx import ...`` de worker.py
+   (diseñadas para Docker donde WORKDIR=/app == services/worker_nlp/app)
+   funcionen al ejecutar desde la raíz del proyecto.
 
-2. The module objects used internally by ``hybrid_search`` / ``synthesize_verdict``
-   and the module objects targeted by ``patch("services.worker_nlp.app.rag.*")``
-   are **identical** — avoiding the double-import identity problem that would
-   otherwise make patches invisible to the real function code.
+2. Que los objetos de módulo usados internamente por ``hybrid_search`` /
+   ``synthesize_verdict`` y los apuntados por ``patch("services.worker_nlp.app.rag.*")``
+   sean **idénticos** — evitando el problema de doble importación que
+   haría invisibles los parches al código real de la función.
 
-Implementation note: registration is done inside an autouse fixture (not at
-module level) so that it does not permanently pollute sys.modules during
-pytest collection.  test_gateway/conftest.py uses the same pattern to register
-gateway modules, and teardown/restore prevents cross-contamination between
-test suites.
+Nota de implementación: el registro se hace dentro de un fixture autouse
+(no a nivel de módulo) para no contaminar sys.modules permanentemente durante
+la colección de pytest. test_gateway/conftest.py usa el mismo patrón para
+registrar los módulos de gateway, y el teardown/restore evita contaminación
+cruzada entre suites de tests.
 """
 from __future__ import annotations
 
@@ -29,7 +30,7 @@ import pytest
 
 @pytest.fixture(autouse=True, scope="module")
 def _worker_nlp_app_modules():
-    """Register services.worker_nlp.app.* as app.* for the duration of this module."""
+    """Registra services.worker_nlp.app.* como app.* durante la duración de este módulo."""
     _NAMES = ("cache", "metrics", "ner", "rag")
     saved: dict[str, object] = {}
 

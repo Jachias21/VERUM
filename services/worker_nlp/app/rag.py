@@ -1,12 +1,6 @@
 """
-RAG pipeline — Hybrid Search (Local Qdrant → Google Fact Check API fallback)
-followed by LLM synthesis via Ollama.
-
-Architecture:
-  Level 1: Hybrid vector search (dense + BM25 sparse, fused with RRF) against
-           local Qdrant knowledge base.
-  Level 2: On-demand Google Fact Check Tools API (if Level 1 confidence < threshold).
-  Synthesis: Ollama SLM (Llama 3.2 / Qwen 2.5) generates a 3-line verdict.
+Pipeline RAG - búsqueda híbrida en Qdrant (densa + BM25, fusión RRF) con
+Google Fact Check y GNews como fallbacks, seguido de síntesis por LLM (Ollama).
 """
 from __future__ import annotations
 
@@ -29,11 +23,11 @@ from models.nlp.embeddings import embed, sparse_embed
 
 logger = logging.getLogger("verum.rag")
 
-# In-memory cache for Google Fact Check API results (asyncio single-thread, no lock needed)
+# Caché en memoria para resultados de la API Google Fact Check (asyncio mono-hilo, sin lock)
 _google_fc_cache: TTLCache = TTLCache(maxsize=256, ttl=300)
 
-# Session-level GNews circuit-breaker: set to True on first 403/429 to stop
-# hammering the API when the key plan is exhausted or forbidden.
+# Circuit-breaker de sesión para GNews: se activa en el primer 403/429 para
+# dejar de llamar a la API cuando la cuota del plan está agotada.
 _gnews_session_disabled: bool = False
 
 
@@ -41,11 +35,7 @@ def _disable_gnews_session() -> None:
     global _gnews_session_disabled
     _gnews_session_disabled = True
 
-# ── Ollama configuration ──────────────────────────────────────────────────────
 OLLAMA_TIMEOUT_SECONDS: float = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "600"))
-
-# ── NL verdict patterns — compiled once at import time ────────────────────────
-# Tier 2: Spanish natural-language signals
 _FAKE_NL_PATTERNS: list[re.Pattern] = [
     re.compile(r"\b(es|son|resulta)\s+(un\s+)?(bulo|falso|falsa|mentira|fraude|fake|engaño)\b", re.IGNORECASE),
     re.compile(r"\bha\s+sido\s+desmentid[oa]\b", re.IGNORECASE),
@@ -62,7 +52,7 @@ _UNVERIFIED_NL_PATTERNS: list[re.Pattern] = [
     re.compile(r"\bno\s+hay\s+(suficiente\s+)?(información|evidencia)\b", re.IGNORECASE),
     re.compile(r"\bno\s+menciona\b", re.IGNORECASE),
 ]
-# Tier 3: English natural-language signals
+# English NL signals
 _FAKE_EN_PATTERNS: list[re.Pattern] = [
     re.compile(r"\b(is|are|appears?\s+to\s+be)\s+(fake|false|misinformation|a\s+hoax)\b", re.IGNORECASE),
     re.compile(r"\bhas\s+been\s+debunked\b", re.IGNORECASE),
@@ -78,8 +68,6 @@ _UNVERIFIED_EN_PATTERNS: list[re.Pattern] = [
     re.compile(r"\bdoes\s+not\s+mention\b", re.IGNORECASE),
 ]
 
-
-# ── LLM prompt templates ─────────────────────────────────────────────────────
 
 _PROMPT_WITH_CONTEXT = """Eres un verificador de hechos. Tu tarea es decidir si un mensaje viral es VERDADERO, FALSO o NO VERIFICADO basándote en un artículo de referencia.
 
@@ -181,9 +169,8 @@ async def hybrid_search(
     text: str,
     entities: list[str],
 ) -> NLPResult:
-    """
-    Execute Level-1 local search; fall back to Level-2 API if needed.
-    Returns a partially-filled NLPResult (verdict is placeholder; synthesize_verdict decides).
+    """Búsqueda local en Qdrant con fallback a APIs externas si la confianza es baja.
+    Devuelve un NLPResult parcialmente relleno; synthesize_verdict decide el veredicto final.
     """
     threshold = float(os.getenv("NLP_CONFIDENCE_THRESHOLD", 0.65))
     min_relevance = float(os.getenv("NLP_MIN_ARTICLE_SCORE", 0.35))
@@ -194,10 +181,10 @@ async def hybrid_search(
         query_id, entities,
     )
 
-    # ── Early exit: no entities and text too short to search meaningfully ─────
+    # Salida temprana: texto demasiado corto y sin entidades
     _min_len = int(os.getenv("NLP_MIN_TEXT_LENGTH", 50))
     if not entities and len(text) < _min_len:
-        logger.warning("hybrid_search: early-exit — text too short and no entities for query_id=%s", query_id)
+        logger.warning("hybrid_search: salida temprana - texto corto y sin entidades para query_id=%s", query_id)
         return NLPResult(
             query_id=query_id,
             extracted_entities=[],
@@ -209,13 +196,13 @@ async def hybrid_search(
             ),
         )
 
-    # ── Level 1: Local Qdrant hybrid search ──────────────────────────────────
-    query_terms = entities if entities else [text[:200]]  # graceful degradation
+    # Local Qdrant hybrid search
+    query_terms = entities if entities else [text[:200]]  # degradación controlada
     local_hits = await _search_qdrant(query_terms)
 
     top_score = local_hits[0]["score"] if local_hits else 0.0
     logger.info(
-        "Qdrant returned %d hits, top_score=%.3f for query_id=%s",
+        "Qdrant devolvió %d resultados, puntuación máxima=%.3f para query_id=%s",
         len(local_hits), top_score, query_id,
     )
 
@@ -236,33 +223,33 @@ async def hybrid_search(
                 extracted_entities=entities,
                 fact_check_matches=len(local_hits),
                 source_url=best.get("url"),
-                verdict="UNVERIFIED",  # placeholder — LLM decides
+                verdict="UNVERIFIED",  # marcador - el LLM decide
                 retrieved_context=best.get("text", ""),
                 summary="",
             )
 
-    # ── Level 2: parallel fallback (Google Fact Check + GNews) ─────────────────
+    # Fallback L2: Google Fact Check + GNews
     l2_query = _build_l2_query(entities, text)
     l1_score = local_hits[0]["score"] if local_hits else 0.0
 
     logger.warning(
-        "L1 miss (score=%.3f, threshold=%.2f) — activating L2 fallback for query_id=%s",
+        "L1 miss (puntuación=%.3f, umbral=%.2f) - activando fallback L2 para query_id=%s",
         l1_score, threshold, query_id,
     )
     try:
         from langdetect import detect
         _lang = detect(text)
         if _lang not in ("es", "en"):
-            _lang = "en"  # default to English for maximum international coverage
+            _lang = "en"  # por defecto inglés para mayor cobertura internacional
     except Exception:
         _lang = "es"
-    logger.info("[rag] L2 querying with lang=%s for query_id=%s", _lang, query_id)
+    logger.info("[rag] L2 consultando con lang=%s para query_id=%s", _lang, query_id)
     google_hits, gnews_hits = await asyncio.gather(
         _search_google_fact_check(l2_query, lang=_lang),
         _search_gnews(l2_query, lang=_lang),
     )
     logger.info(
-        "L2 results — Google FC returned %d claims, GNews returned %d articles for query_id=%s",
+        "L2 - Google FC devolvió %d claims, GNews devolvió %d artículos para query_id=%s",
         len(google_hits), len(gnews_hits), query_id,
     )
 
@@ -271,7 +258,7 @@ async def hybrid_search(
         overlap = _topic_overlap_score(entities, best.get("text", ""))
         if best.get("text", "").strip() and overlap >= min_overlap:
             logger.info(
-                "[rag] L2 Google FC hit accepted (overlap=%.2f) for query_id=%s",
+                "[rag] L2 Google FC aceptado (overlap=%.2f) para query_id=%s",
                 overlap, query_id,
             )
             return NLPResult(
@@ -279,12 +266,12 @@ async def hybrid_search(
                 extracted_entities=entities,
                 fact_check_matches=len(google_hits),
                 source_url=best.get("url"),
-                verdict="UNVERIFIED",  # placeholder — LLM decides
+                verdict="UNVERIFIED",  # marcador - el LLM decide
                 retrieved_context=best.get("text", ""),
                 summary="",
             )
         logger.warning(
-            "[rag] L2 Google FC hit discarded (empty body or overlap %.2f < %.2f) for query_id=%s",
+            "[rag] L2 Google FC descartado (cuerpo vacío u overlap %.2f < %.2f) para query_id=%s",
             overlap, min_overlap, query_id,
         )
 
@@ -293,7 +280,7 @@ async def hybrid_search(
         overlap = _topic_overlap_score(entities, best.get("text", ""))
         if best.get("text", "").strip() and overlap >= min_overlap:
             logger.info(
-                "[rag] L2 GNews hit accepted (overlap=%.2f) for query_id=%s",
+                "[rag] L2 GNews aceptado (overlap=%.2f) para query_id=%s",
                 overlap, query_id,
             )
             return NLPResult(
@@ -301,16 +288,16 @@ async def hybrid_search(
                 extracted_entities=entities,
                 fact_check_matches=len(gnews_hits),
                 source_url=best.get("url"),
-                verdict="UNVERIFIED",  # placeholder — LLM decides
+                verdict="UNVERIFIED",  # marcador - el LLM decide
                 retrieved_context=best.get("text", ""),
                 summary="",
             )
         logger.warning(
-            "[rag] L2 GNews hit discarded (empty body or overlap %.2f < %.2f) for query_id=%s",
+            "[rag] L2 GNews descartado (cuerpo vacío u overlap %.2f < %.2f) para query_id=%s",
             overlap, min_overlap, query_id,
         )
 
-    # ── L1 medium: use best local hit if score >= min_relevance ──────────────
+    # L1 medium: use best local hit if score >= min_relevance
     if local_hits:
         best = local_hits[0]
         score = best["score"]
@@ -318,7 +305,7 @@ async def hybrid_search(
             overlap = _topic_overlap_score(entities, best.get("text", ""))
             if best.get("text", "").strip() and overlap >= min_overlap:
                 logger.info(
-                    "[rag] L1 medium hit accepted (score=%.3f, overlap=%.2f) for query_id=%s",
+                    "[rag] L1 medio aceptado (puntuación=%.3f, overlap=%.2f) para query_id=%s",
                     score, overlap, query_id,
                 )
                 return NLPResult(
@@ -326,23 +313,22 @@ async def hybrid_search(
                     extracted_entities=entities,
                     fact_check_matches=len(local_hits),
                     source_url=best.get("url"),
-                    verdict="UNVERIFIED",  # placeholder — LLM decides
+                    verdict="UNVERIFIED",  # marcador - el LLM decide
                     retrieved_context=best.get("text", ""),
                     summary="",
                 )
-            logger.info(
-                "[rag] L1 medium hit discarded (overlap %.2f < %.2f or empty body) for query_id=%s",
-                overlap, min_overlap, query_id,
-            )
+                logger.info(
+                    "[rag] L1 medio descartado (overlap %.2f < %.2f o cuerpo vacío) para query_id=%s",
+                    overlap, min_overlap, query_id,
+                )
         else:
             logger.info(
-                "[rag] Discarding local hit score=%.3f < MIN_RELEVANCE=%.2f for query_id=%s",
+                "[rag] Descartando resultado local puntuación=%.3f < MIN_RELEVANCE=%.2f para query_id=%s",
                 score, min_relevance, query_id,
             )
 
-    # ── L3: no reliable context — LLM uses general knowledge ─────────────────
     logger.info(
-        "[rag] No reliable context found — invoking LLM with general knowledge for query_id=%s",
+        "[rag] Sin contexto fiable - invocando LLM con conocimiento general para query_id=%s",
         query_id,
     )
     return NLPResult(
@@ -358,9 +344,9 @@ async def hybrid_search(
 
 async def synthesize_verdict(result: NLPResult, claim_text: str) -> NLPResult:
     """
-    Invoke LLM to decide the final verdict given retrieved context and the user claim.
-    Detects the __USE_GENERAL_KNOWLEDGE__ sentinel to select the appropriate prompt.
-    Sets result.verdict and result.summary in-place and returns the modified result.
+    Invoca el LLM para decidir el veredicto final dado el contexto recuperado y el claim.
+    Detecta el centinela __USE_GENERAL_KNOWLEDGE__ para seleccionar el prompt adecuado.
+    Actualiza result.verdict y result.summary en el mismo objeto y lo devuelve.
     """
     use_general_knowledge = result.summary == "__USE_GENERAL_KNOWLEDGE__"
 
@@ -385,7 +371,7 @@ async def synthesize_verdict(result: NLPResult, claim_text: str) -> NLPResult:
     )
 
     logger.info(
-        "[rag] Ollama synthesis — model=%s url=%s use_general_knowledge=%s",
+        "[rag] Síntesis Ollama - model=%s url=%s uso_conocimiento_general=%s",
         model_name, ollama_url, use_general_knowledge,
     )
     llm = OllamaLLM(base_url=ollama_url, model=model_name, temperature=0.0)  # type: ignore[call-arg]
@@ -403,7 +389,7 @@ async def synthesize_verdict(result: NLPResult, claim_text: str) -> NLPResult:
             elapsed_ms = int((time.monotonic() - t0) * 1000)
             verdict_stripped = verdict_text.strip()
             logger.info(
-                "Ollama responded in %dms (attempt=%d): %r",
+                "Ollama respondió en %dms (intento=%d): %r",
                 elapsed_ms, attempt + 1, verdict_stripped[:150],
             )
             extracted_verdict = _extract_verdict_from_llm_output(verdict_stripped)
@@ -413,7 +399,7 @@ async def synthesize_verdict(result: NLPResult, claim_text: str) -> NLPResult:
             return result
         except asyncio.TimeoutError:
             logger.warning(
-                "[rag] Ollama timeout after %ds (attempt=%d/%d)",
+                "[rag] Timeout Ollama tras %ds (intento=%d/%d)",
                 OLLAMA_TIMEOUT_SECONDS, attempt + 1, MAX_RETRIES + 1,
             )
             if attempt == MAX_RETRIES:
@@ -424,7 +410,7 @@ async def synthesize_verdict(result: NLPResult, claim_text: str) -> NLPResult:
                 return result
             await asyncio.sleep(2 ** attempt)
         except Exception as exc:
-            logger.error("[rag] Ollama synthesis error (attempt %d/%d): %s", attempt + 1, MAX_RETRIES + 1, exc)
+            logger.error("[rag] Error de síntesis Ollama (intento %d/%d): %s", attempt + 1, MAX_RETRIES + 1, exc)
             if attempt == MAX_RETRIES:
                 result.summary = (
                     "No se ha podido generar el resumen explicativo. "
@@ -432,24 +418,18 @@ async def synthesize_verdict(result: NLPResult, claim_text: str) -> NLPResult:
                 )
                 return result
             await asyncio.sleep(2 ** attempt)
-    # Unreachable, but satisfies type checkers
+    # Inalcanzable, satisface al comprobador de tipos
     result.summary = "No se ha podido generar el resumen explicativo. Consulta directamente la fuente."
     return result
 
 
 def _extract_verdict_from_llm_output(text: str) -> str | None:
     """
-    Parse free-form LLM output and return a canonical verdict string.
-    Returns "FAKE", "REAL", or "UNVERIFIED", or None if nothing matches.
-
-    Priority:
-      Tier 1 (strict)  — VEREDICTO:/VERDICT: prefix patterns (always wins).
-      Tier 2 (NL ES)   — Spanish natural-language signals.
-      Tier 3 (NL EN)   — English natural-language signals.
-
-    Within Tier 2/3, UNVERIFIED beats FAKE (more conservative).
+    Parsea la salida libre del LLM y devuelve "FAKE", "REAL", "UNVERIFIED" o None.
+    Los patrones de prefijo VEREDICTO:/VERDICT: tienen prioridad; las señales NL
+    en español se comprueban antes que las inglesas. UNVERIFIED gana sobre FAKE en fallbacks NL.
     """
-    # ── Tier 1: strict prefix patterns ────────────────────────────────────────
+    # Patrones estrictos con prefijo VEREDICTO:/VERDICT:
     if re.search(r"veredicto:\s*no[\s_-]verificado", text, re.IGNORECASE):
         return "UNVERIFIED"
     if re.search(r"veredicto:\s*falso\b", text, re.IGNORECASE):
@@ -463,7 +443,7 @@ def _extract_verdict_from_llm_output(text: str) -> str | None:
     if re.search(r"verdict:\s*(true|real)", text, re.IGNORECASE):
         return "REAL"
 
-    # ── Tier 2: Spanish natural-language signals ───────────────────────────────
+    # Fallback NL en español
     _t2_fake = any(p.search(text) for p in _FAKE_NL_PATTERNS)
     _t2_real = any(p.search(text) for p in _REAL_NL_PATTERNS)
     _t2_unverified = any(p.search(text) for p in _UNVERIFIED_NL_PATTERNS)
@@ -475,7 +455,7 @@ def _extract_verdict_from_llm_output(text: str) -> str | None:
     if _t2_real:
         return "REAL"
 
-    # ── Tier 3: English natural-language signals ───────────────────────────────
+    # Fallback NL en inglés
     _t3_fake = any(p.search(text) for p in _FAKE_EN_PATTERNS)
     _t3_real = any(p.search(text) for p in _REAL_EN_PATTERNS)
     _t3_unverified = any(p.search(text) for p in _UNVERIFIED_EN_PATTERNS)
@@ -506,7 +486,7 @@ _NO_INFO_PHRASES = (
 
 
 def _is_no_info_response(text: str) -> bool:
-    """Return True if the LLM summary indicates it could not find relevant info."""
+    """Devuelve True si el resumen del LLM indica que no encontró información relevante."""
     lower = text.lower()
     return any(phrase in lower for phrase in _NO_INFO_PHRASES)
 
@@ -521,20 +501,11 @@ NO_INFO_SUMMARY = (
 
 
 def resolve_final_verdict(result: NLPResult) -> NLPResult:
-    """Decide the final verdict + summary from an LLM-synthesised NLPResult.
-
-    Single source of truth shared by the worker (production) and the eval
-    script, so both behave identically.
-
-    Order matters:
-      1. FIRST try to extract a clear verdict from the LLM output. A valid
-         FALSO/VERDADERO/NO VERIFICADO must win even if the explanation also
-         contains a phrase like "no puedo confirmar el dato exacto".
-      2. ONLY if the LLM gave no clear verdict AND its text signals it had no
-         relevant information, degrade gracefully to UNVERIFIED with a helpful
-         generic message.
-
-    Mutates and returns ``result``.
+    """Decide el veredicto y resumen finales a partir de un NLPResult sintetizado por el LLM.
+    Única fuente de verdad compartida por el worker y el script de evaluación.
+    Extrae el veredicto de la salida del LLM; solo cae a UNVERIFIED cuando no hay
+    veredicto claro Y el texto indica que no hay información relevante.
+    Muta y devuelve ``result``.
     """
     llm_verdict = _extract_verdict_from_llm_output(result.summary)
     if llm_verdict is not None:
@@ -548,13 +519,10 @@ def resolve_final_verdict(result: NLPResult) -> NLPResult:
     return result
 
 
-# ── Private helpers ───────────────────────────────────────────────────────────
-
 def _topic_overlap_score(entities: list[str], article_text: str) -> float:
-    """Return the fraction of *entities* that appear as substrings in *article_text*.
-
-    Both sides are lowercased and accent-stripped before comparison so that
-    "Ébola" matches "ebola".  Returns 0.0 when *entities* is empty.
+    """Devuelve la fracción de *entities* que aparecen como subcadenas en *article_text*.
+    Ambos lados se normalizan (minúsculas y sin acentos) antes de comparar.
+    Devuelve 0.0 cuando *entities* está vacío.
     """
     if not entities:
         return 0.0
@@ -568,14 +536,13 @@ def _topic_overlap_score(entities: list[str], article_text: str) -> float:
 
 
 async def _search_qdrant(entities: list[str]) -> list[dict]:
-    """Hybrid vector search (dense + BM25 sparse, fused with RRF) against 'fact_checks'."""
+    """Búsqueda vectorial híbrida (densa + BM25 sparse, fusionada con RRF) en 'fact_checks'."""
     if not entities:
         return []
 
     query_text = " ".join(entities)
     logger.info("[rag] Qdrant query_text: %r (n_entities=%d)", query_text, len(entities))
 
-    # Both embeddings are CPU-bound; run together in a thread pool
     loop = asyncio.get_event_loop()
 
     def _embed_both(text: str):
@@ -599,8 +566,8 @@ async def _search_qdrant(entities: list[str]) -> list[dict]:
     hits = []
     for attempt in range(_MAX_RETRIES + 1):
         if attempt > 0:
-            delay = 2 ** (attempt - 1)  # 1 s, 2 s
-            logger.warning("[rag] Qdrant retry attempt %d/%d (sleeping %ds)", attempt, _MAX_RETRIES, delay)
+            delay = 2 ** (attempt - 1)
+            logger.warning("[rag] Reintento Qdrant %d/%d (esperando %ds)", attempt, _MAX_RETRIES, delay)
             await asyncio.sleep(delay)
         try:
             client = AsyncQdrantClient(host=qdrant_host, port=qdrant_port)
@@ -615,12 +582,12 @@ async def _search_qdrant(entities: list[str]) -> list[dict]:
                 with_payload=True,
             )
             hits = response.points
-            break  # success
+            break
         except Exception as exc:  # noqa: BLE001
             last_exc = exc
-            logger.warning("[rag] Qdrant hybrid search attempt %d failed: %s", attempt + 1, exc)
+            logger.warning("[rag] Búsqueda híbrida Qdrant intento %d falló: %s", attempt + 1, exc)
     else:
-        logger.error("[rag] Qdrant unreachable after %d retries: %s", _MAX_RETRIES, last_exc)
+        logger.error("[rag] Qdrant inaccesible tras %d reintentos: %s", _MAX_RETRIES, last_exc)
         return []
 
     logger.info(
@@ -671,7 +638,7 @@ async def _search_google_fact_check(query: str, lang: str = "es") -> list[dict]:
     # Sanitise query before sending to Google FC
     query_clean = re.sub(r"\s+", " ", query).strip()
     if not query_clean:
-        logger.warning("[rag] Google FC: empty query after sanitisation — skipping")
+        logger.warning("[rag] Google FC: empty query after sanitisation - skipping")
         return []
     if len(query_clean) > 150:
         query_clean = query_clean[:150].rsplit(" ", 1)[0]
@@ -684,7 +651,7 @@ async def _search_google_fact_check(query: str, lang: str = "es") -> list[dict]:
 
     api_key = os.getenv("GOOGLE_FACT_CHECK_API_KEY", "")
     if not api_key:
-        logger.warning("[rag] Google FC API: key not configured — skipping")
+        logger.warning("[rag] Google FC API: key not configured - skipping")
         return []
     logger.info("[rag] Google FC API: key_present=True, querying...")
     url = "https://factchecktools.googleapis.com/v1alpha1/claims:search"
@@ -724,17 +691,17 @@ async def _search_gnews(query: str, lang: str = "es") -> list[dict]:
     """
     api_key = os.getenv("GNEWS_API_KEY", "")
     if not api_key:
-        logger.warning("[rag] GNews API: key not configured — skipping")
+        logger.warning("[rag] GNews API: key not configured - skipping")
         return []
     if _gnews_session_disabled:
-        logger.debug("[rag] GNews API: skipping — disabled for this session (prior 403/429)")
+        logger.debug("[rag] GNews API: skipping - disabled for this session (prior 403/429)")
         return []
     logger.info("[rag] GNews API: key_present=True, querying...")
     url = "https://gnews.io/api/v4/search"
     # Sanitise query before sending to GNews
     query_clean = re.sub(r"\s+", " ", query).strip()
     if not query_clean:
-        logger.warning("[rag] GNews: empty query after sanitisation — skipping")
+        logger.warning("[rag] GNews: empty query after sanitisation - skipping")
         return []
     if len(query_clean) > 150:
         query_clean = query_clean[:150].rsplit(" ", 1)[0]
@@ -748,14 +715,14 @@ async def _search_gnews(query: str, lang: str = "es") -> list[dict]:
             if resp.status_code == 403:
                 _disable_gnews_session()
                 logger.warning(
-                    "[rag] GNews API: 403 Forbidden — API key plan does not allow this request. "
+                    "[rag] GNews API: 403 Forbidden - API key plan does not allow this request. "
                     "GNews will be skipped for the rest of this session."
                 )
                 return []
             if resp.status_code == 429:
                 _disable_gnews_session()
                 logger.warning(
-                    "[rag] GNews API: 429 Too Many Requests — rate limit exceeded. "
+                    "[rag] GNews API: 429 Too Many Requests - rate limit exceeded. "
                     "GNews will be skipped for the rest of this session."
                 )
                 return []
@@ -844,7 +811,7 @@ def _build_l2_query(entities: list[str], fallback_text: str) -> str:
         for j in range(len(filtered)):
             if i == j or not keep[i]:
                 continue
-            # If norm[i] is contained in norm[j], i is the shorter/subset — drop it
+            # If norm[i] is contained in norm[j], i is the shorter/subset - drop it
             if norms[i] in norms[j] and norms[i] != norms[j]:
                 keep[i] = False
     deduped = [e for e, k in zip(filtered, keep) if k]

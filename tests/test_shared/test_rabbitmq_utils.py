@@ -1,4 +1,4 @@
-"""Unit tests for shared.rabbitmq_utils."""
+"""Tests unitarios para shared.rabbitmq_utils."""
 import pytest
 
 
@@ -7,7 +7,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 def _set_env(monkeypatch, overrides: dict) -> None:
-    """Set all four required AMQP env vars, applying *overrides* on top."""
+    """Establece las cuatro vars de entorno AMQP requeridas, aplicando *overrides* encima."""
     defaults = {
         "RABBITMQ_USER": "verum",
         "RABBITMQ_PASS": "verum_pass",
@@ -47,9 +47,9 @@ def test_build_amqp_url_encodes_special_chars(monkeypatch):
     from shared.rabbitmq_utils import build_amqp_url
 
     url = build_amqp_url()
-    # quote_plus encodes @ → %40, / → %2F
+    # quote_plus codifica @ → %40, / → %2F
     assert "p%40ss%2Fword" in url
-    # Raw special chars must NOT appear in the credential segment
+    # Los caracteres especiales en bruto NO deben aparecer en el segmento de credenciales
     assert ":p@ss/word@" not in url
 
 

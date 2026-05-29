@@ -1,17 +1,7 @@
 """
-Two-Stream CNN inference pipeline.
-
-Steps:
-  1. Decodificar imagen y convertir a RGB.
-  2. Rama frecuencial: rgb_to_freq_tensor (models/vision/preprocess.py)
-     → tensor (2, 224, 224) float32.
-  3. Rama espacial: resize + normalización ImageNet → tensor (3, 224, 224) float32.
-  4. Ejecutar sesión ONNX con inputs rgb (1,3,224,224) y freq (1,2,224,224).
-  5. Devolver VisionResult con score y veredicto según VISION_CONFIDENCE_THRESHOLD.
-
-El modelo ONNX se carga una sola vez al importar el módulo (singleton).
-Si el fichero no existe en VISION_MODEL_PATH el worker arranca en modo
-degradado y devuelve UNVERIFIED sin lanzar excepciones.
+Pipeline de inferencia dual-stream (rama RGB espacial + rama frecuencial).
+La sesión ONNX se carga una vez al importar; si el modelo no existe
+el worker devuelve UNVERIFIED sin lanzar excepciones.
 """
 from __future__ import annotations
 
@@ -22,9 +12,7 @@ import logging
 import cv2
 import numpy as np
 
-# ---------------------------------------------------------------------------
-# Importaciones opcionales — el worker arranca aunque falten estas librerías.
-# ---------------------------------------------------------------------------
+# Importaciones opcionales - el worker arranca aunque falten estas librerias.
 try:
     import onnxruntime as ort  # type: ignore[import]
     _ORT_AVAILABLE = True
@@ -33,7 +21,7 @@ except ImportError:
     _ORT_AVAILABLE = False
 
 try:
-    import torch  # noqa: F401 — requerido por rgb_to_freq_tensor
+    import torch  # noqa: F401 - requerido por rgb_to_freq_tensor
     _TORCH_AVAILABLE = True
 except ImportError:
     torch = None  # type: ignore[assignment]
@@ -42,7 +30,7 @@ except ImportError:
 # rgb_to_freq_tensor vive en models/vision/preprocess.py.
 # El Dockerfile añade /app al PYTHONPATH; en local debe configurarse igual.
 try:
-    from models.vision.preprocess import rgb_to_freq_tensor  # type: ignore[import] --> cambiar cuando se llegue a dockerizar 
+    from models.vision.preprocess import rgb_to_freq_tensor  # type: ignore[import] --> cambiar al dockerizar
     _PREPROCESS_AVAILABLE = True
 except ImportError:
     rgb_to_freq_tensor = None  # type: ignore[assignment]
@@ -52,16 +40,11 @@ from shared.schemas import VisionResult  # noqa: E402
 
 log = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Constantes
-# ---------------------------------------------------------------------------
 _IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 _IMAGENET_STD  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 _IMG_SIZE = 224
 
-# ---------------------------------------------------------------------------
-# Singleton ONNX — se inicializa una única vez al importar el módulo.
-# ---------------------------------------------------------------------------
+# Singleton ONNX - se inicializa una unica vez al importar el modulo.
 _SESSION: "ort.InferenceSession | None" = None  # type: ignore[name-defined]
 _MODEL_UNAVAILABLE: bool = False
 
@@ -72,7 +55,7 @@ def _load_session() -> None:
 
     if not _ORT_AVAILABLE:
         log.warning(
-            "onnxruntime no instalado — inferencia ONNX deshabilitada."
+            "onnxruntime no instalado - inferencia ONNX deshabilitada."
         )
         _MODEL_UNAVAILABLE = True
         return
@@ -105,9 +88,7 @@ def _load_session() -> None:
 _load_session()
 
 
-# ---------------------------------------------------------------------------
 # Preprocesado
-# ---------------------------------------------------------------------------
 
 def _prepare_rgb_tensor(img_rgb: np.ndarray) -> np.ndarray:
     """
@@ -115,9 +96,9 @@ def _prepare_rgb_tensor(img_rgb: np.ndarray) -> np.ndarray:
     normalizado con media y desviación ImageNet.
     """
     img = cv2.resize(img_rgb, (_IMG_SIZE, _IMG_SIZE)).astype(np.float32) / 255.0
-    img = (img - _IMAGENET_MEAN) / _IMAGENET_STD   # normalización canal a canal
-    img = img.transpose(2, 0, 1)                    # HWC → CHW (3, H, W)
-    return np.expand_dims(img, axis=0)              # (1, 3, H, W)
+    img = (img - _IMAGENET_MEAN) / _IMAGENET_STD
+    img = img.transpose(2, 0, 1)
+    return np.expand_dims(img, axis=0)
 
 
 def _prepare_freq_tensor(img_rgb: np.ndarray) -> np.ndarray:
@@ -155,23 +136,13 @@ def _prepare_freq_tensor(img_rgb: np.ndarray) -> np.ndarray:
     return np.expand_dims(freq_np.astype(np.float32), axis=0)  # (1, 2, H, W)
 
 
-# ---------------------------------------------------------------------------
-# Función pública
-# ---------------------------------------------------------------------------
-
 async def run_inference(query_id: uuid.UUID, image_bytes: bytes) -> VisionResult:
-    """
-    Ejecuta la inferencia dual-branch y devuelve un VisionResult.
-
-    Casos de retorno UNVERIFIED (sin crash):
-      - image_bytes está vacío.
-      - El modelo ONNX no está disponible.
-      - La imagen no se puede decodificar.
-      - Error interno durante la sesión ONNX.
+    """Ejecuta la inferencia dual-branch y devuelve un VisionResult.
+    Retorna UNVERIFIED (sin crash) si la imagen está vacía, el modelo no está
+    disponible, la imagen no se puede decodificar o la sesión ONNX falla.
     """
     threshold = float(os.getenv("VISION_CONFIDENCE_THRESHOLD", "0.80"))
 
-    # ── Guardia: sin imagen ──────────────────────────────────────────────────
     if not image_bytes:
         return VisionResult(
             query_id=query_id,
@@ -180,10 +151,9 @@ async def run_inference(query_id: uuid.UUID, image_bytes: bytes) -> VisionResult
             verdict="UNVERIFIED",
         )
 
-    # ── Guardia: modelo no disponible ────────────────────────────────────────
     if _MODEL_UNAVAILABLE or _SESSION is None:
         log.warning(
-            "query_id=%s — modelo ONNX no disponible; retornando UNVERIFIED.",
+            "query_id=%s - modelo ONNX no disponible; retornando UNVERIFIED.",
             query_id,
         )
         return VisionResult(
@@ -193,26 +163,23 @@ async def run_inference(query_id: uuid.UUID, image_bytes: bytes) -> VisionResult
             verdict="UNVERIFIED",
         )
 
-    # ── Decodificar imagen ───────────────────────────────────────────────────
     nparr = np.frombuffer(image_bytes, np.uint8)
     img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if img_bgr is None:
-        log.error("query_id=%s — no se pudo decodificar la imagen.", query_id)
+        log.error("query_id=%s - no se pudo decodificar la imagen.", query_id)
         return VisionResult(
             query_id=query_id,
             ai_confidence_score=0.0,
             prnu_detected=False,
             verdict="UNVERIFIED",
         )
-    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)  # (H, W, 3) uint8
+    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
 
-    # ── Preparar tensores ────────────────────────────────────────────────────
-    rgb_input  = _prepare_rgb_tensor(img_rgb)   # (1, 3, 224, 224) float32
-    freq_input = _prepare_freq_tensor(img_rgb)  # (1, 2, 224, 224) float32
+    rgb_input  = _prepare_rgb_tensor(img_rgb)
+    freq_input = _prepare_freq_tensor(img_rgb)
 
-    # ── Construir feed dict por nombre de input ──────────────────────────────
     # Convención de exportación: el modelo usa "rgb" y "freq" como nombres.
-    # Si los nombres difieren, se asigna por shape (canal 3 → rgb, canal 2 → freq).
+    # Si difieren, se asigna por shape (3 canales → rgb, 2 canales → freq).
     input_names = [inp.name for inp in _SESSION.get_inputs()]
     feed: dict[str, np.ndarray] = {}
     for name in input_names:
@@ -221,11 +188,10 @@ async def run_inference(query_id: uuid.UUID, image_bytes: bytes) -> VisionResult
         else:
             feed[name] = rgb_input
 
-    # ── Ejecutar sesión ONNX ─────────────────────────────────────────────────
     try:
         outputs = _SESSION.run(None, feed)
     except Exception as exc:  # noqa: BLE001
-        log.error("query_id=%s — error en sesión ONNX: %s", query_id, exc)
+        log.error("query_id=%s - error en sesión ONNX: %s", query_id, exc)
         return VisionResult(
             query_id=query_id,
             ai_confidence_score=0.0,
@@ -233,9 +199,6 @@ async def run_inference(query_id: uuid.UUID, image_bytes: bytes) -> VisionResult
             verdict="UNVERIFIED",
         )
 
-    # ── Interpretar salida ───────────────────────────────────────────────────
-    # Caso 1: softmax de 2 clases → (1, 2) — índice 1 = p(FAKE).
-    # Caso 2: sigmoid escalar     → (1,) o (1, 1).
     raw = outputs[0]
     if raw.ndim == 2 and raw.shape[1] == 2:
         score = float(raw[0, 1])
@@ -245,9 +208,8 @@ async def run_inference(query_id: uuid.UUID, image_bytes: bytes) -> VisionResult
     # Clamp por seguridad ante salidas sin sigmoid/softmax
     score = max(0.0, min(1.0, score))
 
-    # ── Veredicto ────────────────────────────────────────────────────────────
     verdict = "FAKE" if score >= threshold else "REAL"
-    prnu_detected = score < 0.3   # puntuación sintética baja → PRNU presente
+    prnu_detected = score < 0.3
 
     log.info(
         "query_id=%s score=%.4f threshold=%.2f verdict=%s",

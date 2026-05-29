@@ -2,7 +2,7 @@
 Diagnose ETL verdict distribution by running extract() locally.
 
 Aggregates articles by domain, reports per-domain count and verdict breakdown,
-and flags domains classified as "unknown" — those are the candidates for
+and flags domains classified as "unknown" - those are the candidates for
 inclusion in _INSTITUTIONAL_DOMAINS or _FACTCHECKER_DOMAINS.
 
 Fast: does NOT embed nor touch Qdrant. ~30-90s depending on feed latency.
@@ -28,7 +28,7 @@ def _normalize(url: str) -> str:
 
 
 def main() -> None:
-    print("Running extract() — this may take 30-90s while RSS feeds are fetched…")
+    print("Running extract() - this may take 30-90s while RSS feeds are fetched...")
     articles = extract()
     total = len(articles)
     print(f"\nTotal articles extracted: {total}\n")
@@ -82,7 +82,7 @@ def main() -> None:
         if crit_unv and crit_total:
             print("✓ ALL CRITERIA MET")
         else:
-            print("✗ Not yet — top unknown-class domains to triage:")
+            print("✗ Not yet - top unknown-class domains to triage:")
             for d, n in unknown_domains[:15]:
                 print(f"    {d:<40} ({n} articles)")
 
@@ -96,7 +96,7 @@ def main() -> None:
             silent_feeds.append(feed_url)
     if silent_feeds:
         print()
-        print(f"Silent feeds (zero articles contributed — likely dead or malformed):")
+        print(f"Silent feeds (zero articles contributed - likely dead or malformed):")
         for f in silent_feeds:
             print(f"    {f}")
 

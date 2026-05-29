@@ -1,6 +1,6 @@
 """
-Prometheus counters for the VERUM gateway.
-Imported by both router.py (increment) and main.py (expose /metrics endpoint).
+Contadores Prometheus para el gateway de VERUM.
+Importado tanto por router.py (incremento) como por main.py (exponer /metrics).
 """
 from prometheus_client import Counter
 

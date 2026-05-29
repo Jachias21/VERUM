@@ -1,9 +1,8 @@
 """
-Prometheus metrics for the NLP worker.
+Métricas Prometheus para el worker NLP.
 
-A lightweight HTTP server (default port 9101, configurable via NLP_METRICS_PORT)
-is started by worker.py using prometheus_client.start_http_server() so that
-Prometheus can scrape this container independently from the gateway.
+El servidor HTTP (puerto 9101 por defecto, configurable con NLP_METRICS_PORT)
+es arrancado por worker.py con prometheus_client.start_http_server().
 """
 from prometheus_client import Histogram
 

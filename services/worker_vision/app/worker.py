@@ -1,15 +1,8 @@
 """
-Vision Worker — consumes ImageTask messages from RabbitMQ,
-runs forensic inference, and delivers the verdict to the user via Telegram.
-
-Message flow:
-  1. Consume ImageTask from RabbitMQ queue (topic_images).
-  2. Download image from Telegram (getFile → file download).
-  3. Run dual-branch ONNX inference (run_inference).
-  4. If FAKE → generate Grad-CAM heatmap (generate_heatmap).
-  5. Reply to user via Telegram (photo + caption if FAKE, text otherwise).
-  6. Persist QueryLog to MongoDB.
-  7. ACK the RabbitMQ message (always, even on download/send failure).
+Worker de visión - consume mensajes ImageTask de RabbitMQ,
+ejecutar la inferencia forense y envía el veredicto al usuario por Telegram.
+En caso de éxito hace ACK; ante excepción no controlada hace NACK sin
+reencolar para que el mensaje no se pierda ni se reintente indefinidamente.
 """
 from __future__ import annotations
 
@@ -35,11 +28,7 @@ load_dotenv()
 
 log = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# MongoDB singleton — one client for the lifetime of the process.
-# get_mongo_db() from shared/db.py creates a new client on every call;
-# we keep our own handle here to avoid per-message connection overhead.
-# ---------------------------------------------------------------------------
+# Cliente MongoDB singleton - un cliente por vida del proceso.
 _mongo_client: AsyncIOMotorClient | None = None
 
 
@@ -54,20 +43,14 @@ def _get_db() -> AsyncIOMotorDatabase:
     return _mongo_client[os.environ["MONGO_DB"]]
 
 
-# ---------------------------------------------------------------------------
 # Telegram image download
-# ---------------------------------------------------------------------------
 
 async def _download_telegram_image(file_id: str, token: str) -> bytes:
-    """
-    Two-step Telegram download:
-      1. GET /getFile?file_id=... → obtain file_path.
-      2. GET /file/bot{token}/{file_path} → download raw bytes.
-
-    Raises httpx.HTTPError on any HTTP or network error.
+    """Descarga en dos pasos: GET /getFile para resolver file_path, luego descarga los bytes.
+    Lanza httpx.HTTPError en errores de red.
     """
     async with httpx.AsyncClient(timeout=30) as client:
-        # Step 1 — resolve file_path
+        # Paso 1: resolver file_path
         r = await client.get(
             f"https://api.telegram.org/bot{token}/getFile",
             params={"file_id": file_id},
@@ -75,7 +58,7 @@ async def _download_telegram_image(file_id: str, token: str) -> bytes:
         r.raise_for_status()
         file_path: str = r.json()["result"]["file_path"]
 
-        # Step 2 — download content
+        # Paso 2: descargar contenido
         dl = await client.get(
             f"https://api.telegram.org/file/bot{token}/{file_path}"
         )
@@ -83,15 +66,8 @@ async def _download_telegram_image(file_id: str, token: str) -> bytes:
         return dl.content
 
 
-# ---------------------------------------------------------------------------
-# Reply text builder
-# ---------------------------------------------------------------------------
-
 def _build_reply_text(result: VisionResult) -> str:
-    """
-    Builds the Telegram reply text using HTML parse mode to avoid
-    MarkdownV2 escaping issues with score percentages and symbols.
-    """
+    """Construye el texto de respuesta de Telegram en modo HTML."""
     score_pct = f"{result.ai_confidence_score:.1%}"
     prnu_line = (
         "🔬 PRNU signature: <b>detected ✓</b>"
@@ -113,12 +89,8 @@ def _build_reply_text(result: VisionResult) -> str:
     )
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 def _image_resolution(image_bytes: bytes) -> str | None:
-    """Returns 'WxH' string or None if the image cannot be decoded."""
+    """Devuelve la cadena 'AxA' o None si la imagen no puede decodificarse."""
     nparr = np.frombuffer(image_bytes, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if img is None:
@@ -127,17 +99,13 @@ def _image_resolution(image_bytes: bytes) -> str | None:
     return f"{w}x{h}"
 
 
-# ---------------------------------------------------------------------------
-# MongoDB persistence
-# ---------------------------------------------------------------------------
-
 async def _save_query_log(
     task: ImageTask,
     result: VisionResult,
     elapsed_ms: int,
     image_bytes: bytes,
 ) -> None:
-    """Inserts a QueryLog document. Logs and swallows any DB error."""
+    """Inserta un documento QueryLog. Registra y silencia cualquier error de BD."""
     try:
         db = _get_db()
         collection = db[os.environ["MONGO_COLLECTION_QUERIES"]]
@@ -153,17 +121,13 @@ async def _save_query_log(
             prnu_detected=result.prnu_detected,
         )
         await collection.insert_one(doc.model_dump())
-        log.debug("query_id=%s — QueryLog guardado en MongoDB.", task.query_id)
+        log.debug("query_id=%s - QueryLog guardado en MongoDB.", task.query_id)
     except Exception as exc:  # noqa: BLE001
         log.error(
-            "query_id=%s — error al guardar en MongoDB: %s",
+            "query_id=%s - error al guardar en MongoDB: %s",
             task.query_id, exc,
         )
 
-
-# ---------------------------------------------------------------------------
-# Telegram reply
-# ---------------------------------------------------------------------------
 
 async def _send_reply(
     bot: Bot,
@@ -172,12 +136,10 @@ async def _send_reply(
     text: str,
 ) -> None:
     """
-    Sends the verdict to the user:
-      - FAKE  → send_photo with heatmap as attachment and text as caption.
-      - REAL / UNVERIFIED → send_message with text only.
-
-    If sending the photo fails (e.g. heatmap file missing) it falls back
-    to sending a plain text message.
+    Envía el veredicto al usuario:
+      - FAKE  → send_photo con el heatmap y el texto como caption.
+      - REAL / UNVERIFIED → send_message solo con texto.
+    Si el envío de la foto falla (p.ej. archivo no disponible) cae al texto plano.
     """
     if result.verdict == "FAKE" and result.heatmap_path:
         try:
@@ -191,12 +153,12 @@ async def _send_reply(
             return
         except (OSError, Exception) as exc:  # noqa: BLE001
             log.warning(
-                "query_id=%s — no se pudo enviar el heatmap (%s); "
+                "query_id=%s - no se pudo enviar el heatmap (%s); "
                 "enviando solo texto.",
                 task.query_id, exc,
             )
 
-    # Fallback / non-FAKE path
+    # Ruta no-FAKE o fallback
     await bot.send_message(
         chat_id=task.chat_id,
         text=text,
@@ -204,17 +166,11 @@ async def _send_reply(
     )
 
 
-# ---------------------------------------------------------------------------
-# RabbitMQ message handler
-# ---------------------------------------------------------------------------
-
 async def process(message: aio_pika.abc.AbstractIncomingMessage) -> None:
     """
-    Processes one RabbitMQ ImageTask message.
-
-    The `message.process()` context manager guarantees ACK on normal exit
-    and NACK (with requeue=False) on unhandled exception, so the message
-    is never lost but also never requeued for infinite retries.
+    Procesa un mensaje ImageTask de RabbitMQ.
+    El context manager `message.process()` garantiza ACK en salida normal
+    y NACK (requeue=False) ante excepción no controlada.
     """
     async with message.process():
         task = ImageTask.model_validate_json(message.body)
@@ -222,42 +178,36 @@ async def process(message: aio_pika.abc.AbstractIncomingMessage) -> None:
         token = os.environ["TELEGRAM_BOT_TOKEN"]
 
         log.info(
-            "query_id=%s — procesando file_id=%s para chat_id=%s",
+            "query_id=%s - procesando file_id=%s para chat_id=%s",
             task.query_id, task.telegram_file_id, task.chat_id,
         )
 
-        # ── Step 1: Download image ────────────────────────────────────────────
         try:
             image_bytes = await _download_telegram_image(task.telegram_file_id, token)
         except Exception as exc:  # noqa: BLE001
             log.error(
-                "query_id=%s — descarga fallida (file_id=%s): %s",
+                "query_id=%s - descarga fallida (file_id=%s): %s",
                 task.query_id, task.telegram_file_id, exc,
             )
-            # ACK implícito: message.process() ya lo gestiona al salir limpiamente.
             return
 
-        # ── Step 2: Inference ─────────────────────────────────────────────────
         result: VisionResult = await run_inference(task.query_id, image_bytes)
 
-        # ── Step 3: Grad-CAM heatmap (solo si es FAKE) ───────────────────────
         if result.verdict == "FAKE":
             try:
                 result.heatmap_path = await generate_heatmap(image_bytes, task.query_id)
             except Exception as exc:  # noqa: BLE001
                 log.warning(
-                    "query_id=%s — error generando heatmap: %s",
+                    "query_id=%s - error generando heatmap: %s",
                     task.query_id, exc,
                 )
 
         elapsed_ms = int((time.monotonic() - start) * 1000)
 
-        # ── Step 4: Reply to user ─────────────────────────────────────────────
         text = _build_reply_text(result)
         async with Bot(token=token) as bot:
             await _send_reply(bot, task, result, text)
 
-        # ── Step 5: Persist to MongoDB ────────────────────────────────────────
         await _save_query_log(task, result, elapsed_ms, image_bytes)
 
         log.info(
@@ -266,9 +216,7 @@ async def process(message: aio_pika.abc.AbstractIncomingMessage) -> None:
         )
 
 
-# ---------------------------------------------------------------------------
 # Entry point
-# ---------------------------------------------------------------------------
 
 async def main() -> None:
     url = (
@@ -282,13 +230,12 @@ async def main() -> None:
         os.getenv("RABBITMQ_QUEUE_IMAGES", "topic_images"), durable=True
     )
     await queue.consume(process)
-    log.info("[vision worker] Esperando mensajes en la cola '%s'…", queue.name)
-    await asyncio.Future()  # run forever
+    log.info("[vision worker] Esperando mensajes en la cola '%s'...", queue.name)    await asyncio.Future()  # run forever
 
 
 if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s  %(levelname)-8s  %(name)s — %(message)s",
+        format="%(asctime)s  %(levelname)-8s  %(name)s - %(message)s",
     )
     asyncio.run(main())

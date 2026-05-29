@@ -1,5 +1,5 @@
 """
-Tests for services/worker_nlp/app/rag.py
+Tests para services/worker_nlp/app/rag.py
 """
 from __future__ import annotations
 
@@ -10,8 +10,6 @@ import pytest
 
 from shared.schemas import NLPResult
 
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _make_result(**kwargs) -> NLPResult:
     defaults = dict(
@@ -25,8 +23,6 @@ def _make_result(**kwargs) -> NLPResult:
     defaults.update(kwargs)
     return NLPResult(**defaults)
 
-
-# ── Tests 6-9: _extract_verdict_from_llm_output ──────────────────────────────
 
 def test_extract_verdict_fake():
     from services.worker_nlp.app.rag import _extract_verdict_from_llm_output
@@ -49,7 +45,6 @@ def test_extract_verdict_unverified():
 def test_extract_verdict_no_match():
     from services.worker_nlp.app.rag import _extract_verdict_from_llm_output
 
-    # A truly neutral statement that matches none of the verdict patterns
     assert _extract_verdict_from_llm_output("El artículo discute varios aspectos del tema.") is None
 
 
@@ -61,7 +56,7 @@ def test_extract_verdict_no_verified_before_verified():
     ) == "UNVERIFIED"
 
 
-# ── New tests: Tier-2 natural-language verdict extraction ─────────────────────
+
 
 def test_extract_verdict_natural_language_fake():
     from services.worker_nlp.app.rag import _extract_verdict_from_llm_output
@@ -88,15 +83,13 @@ def test_extract_verdict_natural_language_unverified():
 
 
 def test_extract_verdict_strict_wins_over_natural():
-    """Tier-1 strict prefix must win even when NL signals suggest a different verdict."""
+    """El prefijo estricto de nivel 1 debe ganar aunque las señales NL sugieran otro veredicto."""
     from services.worker_nlp.app.rag import _extract_verdict_from_llm_output
 
     assert _extract_verdict_from_llm_output(
         "VEREDICTO: NO VERIFICADO — aunque el texto parece falso, no hay datos."
     ) == "UNVERIFIED"
 
-
-# ── Tests: _topic_overlap_score ───────────────────────────────────────────────
 
 def test_topic_overlap_score_zero_match():
     from services.worker_nlp.app.rag import _topic_overlap_score
@@ -119,7 +112,7 @@ def test_topic_overlap_score_full_match():
 
 
 def test_topic_overlap_score_accent_insensitive():
-    """Accented entity must match its unaccented form in the article."""
+    """Una entidad con acento debe coincidir con su forma sin acento en el artículo."""
     from services.worker_nlp.app.rag import _topic_overlap_score
 
     score = _topic_overlap_score(
@@ -135,7 +128,6 @@ def test_topic_overlap_score_empty_entities():
     assert _topic_overlap_score([], "any article text here") == 0.0
 
 
-# ── Test 10: hybrid_search with high-confidence Qdrant hit ───────────────────
 
 async def test_hybrid_search_qdrant_hit(mock_qdrant_hits):
     fastembed = pytest.importorskip("fastembed", reason="fastembed not installed")
@@ -159,13 +151,11 @@ async def test_hybrid_search_qdrant_hit(mock_qdrant_hits):
         result = await hybrid_search(qid, "El virus de Madrid no existe", ["Madrid", "virus"])
 
     assert isinstance(result, NLPResult)
-    # verdict is placeholder; final verdict is set by synthesize_verdict
     assert result.verdict == "UNVERIFIED"
     assert result.retrieved_context != ""
-    assert result.summary == "", "summary must be empty until synthesize_verdict is called"
+    assert result.summary == "", "summary debe estar vacío hasta que se llame a synthesize_verdict"
 
 
-# ── Test 11: hybrid_search falls back to Google when Qdrant score is low ─────
 
 async def test_hybrid_search_google_fallback():
     fastembed = pytest.importorskip("fastembed", reason="fastembed not installed")
@@ -173,8 +163,6 @@ async def test_hybrid_search_google_fallback():
     SparseEmbedding = fastembed.SparseEmbedding
 
     low_score_hit = [{"score": 0.30, "url": "https://qdrant.example.com", "verdict": "UNVERIFIED", "text": ""}]
-    # text must contain "Madrid" so that _topic_overlap_score(["Madrid"], text) >= 0.25
-    # (otherwise the L2 hit is filtered and verdict becomes UNVERIFIED).
     google_hits = [{"score": 1.0, "url": "https://factcheck.google.com/claim/1", "verdict": "FAKE", "text": "Fact checked article text about Madrid."}]
 
     fake_dense = [0.1] * 1024
@@ -194,13 +182,10 @@ async def test_hybrid_search_google_fallback():
 
         result = await hybrid_search(uuid.uuid4(), "Noticia de prueba para test", ["Madrid"])
 
-    # verdict is placeholder; final verdict is set by synthesize_verdict
     assert result.verdict == "UNVERIFIED"
     assert result.source_url == "https://factcheck.google.com/claim/1"
     assert "Fact checked article text" in result.retrieved_context
 
-
-# ── Test 12: hybrid_search early exit — text too short and no entities ────────
 
 async def test_hybrid_search_early_exit_short_text():
     from services.worker_nlp.app.rag import hybrid_search
@@ -208,11 +193,9 @@ async def test_hybrid_search_early_exit_short_text():
     result = await hybrid_search(uuid.uuid4(), "corto", [])
 
     assert result.verdict == "UNVERIFIED"
-    assert result.summary != ""   # user-facing message must be present
+    assert result.summary != ""   
     assert result.retrieved_context == ""
 
-
-# ── Test 13: synthesize_verdict truncates retrieved_context to 1500 chars ────
 
 async def test_synthesize_verdict_truncates_context():
     long_context = "A" * 3000
@@ -244,8 +227,6 @@ async def test_synthesize_verdict_truncates_context():
         f"context passed to LLM must be <= 1500 chars, got {len(captured_kwargs['context'])}"
     )
 
-
-# ── Tests 14-18: _search_gnews and L2 parallel fallback ──────────────────────
 
 async def test_search_gnews_returns_articles():
     """_search_gnews parses GNews JSON response and returns list with required fields."""
@@ -385,8 +366,6 @@ async def test_hybrid_search_prioritizes_google_fc_over_gnews():
     assert result.source_url == "https://factcheck.google.com/claim/99"
     assert result.retrieved_context == "La afirmación sobre Madrid es verdadera según múltiples fuentes verificadas."
 
-
-# ── Test: L3 sentinel — no context available, LLM uses general knowledge ──────
 
 async def test_hybrid_search_l3_no_context_uses_general_knowledge_sentinel():
     """When no source provides reliable context, hybrid_search returns the L3 sentinel."""

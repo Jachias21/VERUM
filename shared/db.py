@@ -1,6 +1,6 @@
 """
-Shared database client factories.
-Each service calls these helpers to obtain ready-to-use clients.
+Fábricas de clientes de base de datos compartidas.
+Cada servicio llama a estos helpers para obtener clientes listos para usar.
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ def get_mongo_db() -> AsyncIOMotorDatabase:
 
 
 def get_qdrant_client():
-    from qdrant_client import QdrantClient  # lazy import — not available in worker_vision
+    from qdrant_client import QdrantClient  # importación lazy - no disponible en worker_vision
     return QdrantClient(
         host=os.environ["QDRANT_HOST"],
         port=int(os.environ["QDRANT_PORT"]),

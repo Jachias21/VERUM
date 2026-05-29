@@ -1,17 +1,17 @@
 """
-Shared AMQP connection helpers.
+Helpers de conexión AMQP compartidos.
 
-Public API
+API pública
 ----------
 build_amqp_url() -> str
-    Builds the full ``amqp://`` URL from environment variables, URL-encoding
-    credentials so that special characters (``@``, ``:``, ``/``) are safe.
-    Raises ``RuntimeError`` (not ``KeyError``) with the missing variable name
-    if any of the four required vars is absent.
+    Construye la URL completa ``amqp://`` a partir de variables de entorno,
+    codificando las credenciales para que los caracteres especiales sean seguros.
+    Lanza ``RuntimeError`` (no ``KeyError``) con el nombre de la variable ausente
+    si alguna de las cuatro vars requeridas no está presente.
 
 mask_amqp_url(url: str) -> str
-    Returns a copy of *url* with the password replaced by ``***`` so that the
-    URL can be written to logs without leaking credentials.
+    Devuelve una copia de *url* con la contraseña sustituida por ``***`` para
+    poder escribir la URL en logs sin filtrar credenciales.
 """
 import os
 import re
@@ -21,12 +21,12 @@ _REQUIRED_VARS = ("RABBITMQ_USER", "RABBITMQ_PASS", "RABBITMQ_HOST", "RABBITMQ_P
 
 
 def build_amqp_url() -> str:
-    """Return ``amqp://<user>:<pass>@<host>:<port>/`` with URL-encoded credentials.
+    """Devuelve ``amqp://<user>:<pass>@<host>:<port>/`` con credenciales codificadas en URL.
 
     Raises
     ------
     RuntimeError
-        If any of the four required environment variables is not set.
+        Si alguna de las cuatro variables de entorno requeridas no está definida.
     """
     values: dict[str, str] = {}
     for var in _REQUIRED_VARS:
@@ -43,8 +43,8 @@ def build_amqp_url() -> str:
 
 
 def mask_amqp_url(url: str) -> str:
-    """Return *url* with the password segment replaced by ``***``.
+    """Devuelve *url* con el segmento de contraseña reemplazado por ``***``.
 
-    Works on any ``amqp://user:password@host`` style URL.
+    Funciona con cualquier URL estilo ``amqp://user:password@host``.
     """
     return re.sub(r"(amqps?://[^:]+:)[^@]+(@)", r"\1***\2", url)

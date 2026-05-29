@@ -1,6 +1,6 @@
 """
-Named Entity Recognition using SpaCy with dynamic language model selection.
-Extracts key concepts from viral messages before RAG retrieval.
+Reconocimiento de entidades nombradas con SpaCy y selección dinámica de modelo de idioma.
+Extrae conceptos clave de mensajes virales antes de la recuperación RAG.
 """
 from __future__ import annotations
 
@@ -12,18 +12,18 @@ import spacy
 
 logger = logging.getLogger("verum.ner")
 
-# Supported language → SpaCy model name
+# Idioma soportado → nombre del modelo SpaCy
 _MODELS: dict[str, str] = {
     "es": "es_core_news_lg",
     "en": "en_core_web_sm",
 }
 
-# Lazy-loaded singletons, one per detected language
+# Singletons de carga perezosa, uno por idioma detectado
 _nlp_models: dict[str, Any] = {}
 
 
 def _detect_language(text: str) -> str:
-    """Return ISO 639-1 language code for *text*, defaulting to 'es' on failure."""
+    """Devuelve el código ISO 639-1 del idioma de *text*, por defecto 'es' si falla."""
     try:
         from langdetect import detect, LangDetectException  # type: ignore[import]
         try:
@@ -35,7 +35,7 @@ def _detect_language(text: str) -> str:
 
 
 def _get_nlp(lang: str = "es") -> Any:
-    """Return (and lazily load) the SpaCy model for *lang*."""
+    """Devuelve (y carga perezosamente) el modelo SpaCy para *lang*."""
     model_name = _MODELS.get(lang, "es_core_news_lg")
     if lang not in _nlp_models:
         logger.debug("[ner] Loading SpaCy model %r for lang=%r", model_name, lang)
@@ -45,10 +45,9 @@ def _get_nlp(lang: str = "es") -> Any:
 
 def extract_entities(text: str) -> list[str]:
     """
-    Clean the text and extract named entities + key noun chunks.
-    Returns a deduplicated list of entity strings for RAG queries.
+    Limpia el texto y extrae entidades nombradas + noun chunks clave.
+    Devuelve una lista deduplicada de cadenas de entidades para consultas RAG.
     """
-    # Strip emojis, URLs and excessive punctuation
     clean = re.sub(r"http\S+", "", text)
     clean = re.sub(r"[^\w\s]", " ", clean)
 
@@ -56,27 +55,26 @@ def extract_entities(text: str) -> list[str]:
     logger.debug("[ner] Detected language: %s", lang)
     doc = _get_nlp(lang)(clean)
 
-    # ── Named entities (always included) ─────────────────────────────────────
+    # Named entities
     ner_entities: list[str] = [ent.text.strip() for ent in doc.ents]
     ner_lower: set[str] = {e.lower() for e in ner_entities}
 
-    # ── Noun chunks (always combined, not just as fallback) ───────────────────
     filtered_chunks: list[str] = []
     for chunk in doc.noun_chunks:
         chunk_text = chunk.text.strip()
-        # Must be at least 3 chars and have a non-stopword head
+        # Mínimo 3 caracteres y con head que no sea stopword
         if len(chunk_text) < 3 or chunk.root.is_stop:
             continue
         chunk_lower = chunk_text.lower()
-        # Skip if already covered by (or covering) a named entity
+        # Omitir si ya está cubierto por (o cubre) una entidad nombrada
         if any(chunk_lower in ne or ne in chunk_lower for ne in ner_lower):
             continue
         filtered_chunks.append(chunk_text)
 
-    # Sort chunks by length descending so longer (more informative) ones fill slots first
+    # Ordenar chunks por longitud descendente (más informativos primero)
     filtered_chunks.sort(key=len, reverse=True)
 
-    # Combine: NER first, then chunks, capped at 8
+    # Combinar: NER primero, luego chunks, máximo 8
     MAX_ENTITIES = 8
     combined = ner_entities + filtered_chunks
     result = list(dict.fromkeys(e for e in combined if len(e) > 2))[:MAX_ENTITIES]
@@ -87,16 +85,10 @@ def extract_entities(text: str) -> list[str]:
 
 def is_gibberish(text: str) -> bool:
     """
-    Return True if *text* looks like random characters or incoherent input
-    that would cause the RAG pipeline to hallucinate a verdict.
-
-    Four signals are evaluated; at least TWO must fire simultaneously to
-    avoid blocking legitimate short texts or partial English/Catalan input:
-
-    1. alpha_ratio  < 0.40  — fewer than 40 % of tokens are real words
-    2. avg_len      < 3.0   — average alpha-token length is very short
-    3. few_meaningful       — fewer than 4 non-stop alpha tokens (len > 2)
-    4. unknown_ratio > 0.60 — spaCy assigns POS=X to most tokens
+    Devuelve True si *text* parece caracteres aleatorios o entrada incoherente
+    que provocaría que el pipeline RAG alucinase un veredicto.
+    Usa ratio alfa, longitud media de token, conteo de tokens significativos y
+    ratio POS=X de SpaCy - al menos dos señales deben activarse simultáneamente.
     """
     clean = re.sub(r"http\S+", "", text)
     clean = re.sub(r"[^\w\s]", " ", clean).strip()
@@ -104,7 +96,7 @@ def is_gibberish(text: str) -> bool:
     if not clean:
         return True
 
-    # ── Fast-path checks (no SpaCy needed) ────────────────────────────────────
+    # Comprobaciones rápidas (sin SpaCy)
     if len(clean) < 3:
         logger.debug("[ner] Gibberish fast-path triggered for text=%.20r", text)
         return True
@@ -113,13 +105,13 @@ def is_gibberish(text: str) -> bool:
         logger.debug("[ner] Gibberish fast-path triggered for text=%.20r", text)
         return True
 
-    # ── Vowel fast-path: most alphabetic tokens lack any vowel → gibberish ────
+    # Comprobación rápida de vocales
     _VOWELS = set("aeiouáéíóúü")
     ws_alpha = [t for t in clean.split() if t.isalpha()]
     if ws_alpha:
         no_vowel_count = sum(1 for t in ws_alpha if not _VOWELS.intersection(t.lower()))
-        # With >= 5 tokens we have enough statistical signal to lower the threshold;
-        # keyboard-mash patterns (e.g. "asdf qwer zxcv") have ~40 % vowel-less tokens.
+        # Con >= 5 tokens hay suficiente señal estadística; los patrones de
+        # teclado aleatorio (p.ej. "asdf qwer zxcv") tienen ~40% de tokens sin vocal.
         threshold = 0.40 if len(ws_alpha) >= 5 else 0.50
         if no_vowel_count / len(ws_alpha) >= threshold:
             logger.debug("[ner] Gibberish vowel fast-path triggered for text=%.20r", text)
@@ -130,14 +122,13 @@ def is_gibberish(text: str) -> bool:
     doc = _get_nlp(lang)(clean)
 
     if not doc.has_annotation("TAG"):
-        return False  # model could not parse at all — let pipeline handle it
+        return False  # el modelo no pudo parsear - dejar que el pipeline lo gestione
 
     total = max(len(doc), 1)
     alpha_tokens = [t for t in doc if t.is_alpha]
     alpha_count = max(len(alpha_tokens), 1)
 
-    # ── New signal 1: Out-of-Vocabulary (OOV) ratio ───────────────────────────
-    # Only meaningful when the model has word vectors (es_core_news_lg does).
+    # Ratio OOV - solo significativo cuando el modelo tiene vectores (es_core_news_lg sí).
     if doc.vocab.vectors_length > 0:
         long_alpha = [t for t in alpha_tokens if len(t.text) > 2]
         if len(long_alpha) >= 4:
@@ -147,8 +138,8 @@ def is_gibberish(text: str) -> bool:
                 logger.debug("[ner] Gibberish OOV fast-path: oov_ratio=%.2f", oov_ratio)
                 return True
 
-    # ── New signal 2: Consecutive-consonant ratio (pseudo-acronym / random mash)
-    # ñ is treated as a consonant for Spanish; pattern is language-agnostic.
+    # Ratio de racimos de consonantes (pseudo-acrónimo / golpeteo aleatorio)
+    # ñ se trata como consonante en español; el patrón es independiente del idioma.
     _CONSONANT_CLUSTER = re.compile(r"[bcdfghjklmnñpqrstvwxyz]{3,}", re.IGNORECASE)
     if ws_alpha:
         cluster_count = sum(1 for t in ws_alpha if _CONSONANT_CLUSTER.search(t))

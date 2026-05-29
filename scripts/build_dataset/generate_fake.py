@@ -1,5 +1,5 @@
 """
-generate_fake.py — genera imágenes sintéticas con la Hugging Face Inference API
+generate_fake.py - genera imágenes sintéticas con la Hugging Face Inference API
 (SDXL-base-1.0) para construir la clase FAKE del dataset propio de VERUM.
 
 Uso:
@@ -28,19 +28,15 @@ from pathlib import Path
 from huggingface_hub import InferenceClient
 from huggingface_hub.errors import HfHubHTTPError
 
-# ---------------------------------------------------------------------------
 # Modelo & retry
-# ---------------------------------------------------------------------------
 _HF_MODEL = "stabilityai/stable-diffusion-xl-base-1.0"
 _MAX_RETRIES = 6        # reintentos máximos por imagen
 _BACKOFF_BASE = 2.0     # base del backoff exponencial (segundos)
 _BACKOFF_MAX = 120.0    # techo del backoff
 
-# ---------------------------------------------------------------------------
-# Prompts de generación — mismas categorías que scrape_real.py pero
+# Prompts de generacion - mismas categorias que scrape_real.py pero
 # formulados como instrucciones de imagen fotorrealista para SDXL.
 # Sufijo común que mejora la calidad y el fotorrealismo del modelo.
-# ---------------------------------------------------------------------------
 _SUFFIX = ", photorealistic, high quality, detailed, 4k, sharp focus, natural lighting"
 
 PROMPTS: dict[str, list[str]] = {
@@ -88,9 +84,7 @@ PROMPTS: dict[str, list[str]] = {
     ],
 }
 
-# ---------------------------------------------------------------------------
 # Logging
-# ---------------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(message)s",
@@ -98,9 +92,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 def _backoff(attempt: int) -> float:
     """Exponential backoff with jitter, capped at _BACKOFF_MAX seconds."""
@@ -126,10 +118,10 @@ def _generate_one(
     todos los reintentos fallan.
 
     Maneja:
-    - 503 (modelo cargando) — backoff exponencial
-    - 429 (rate-limit)      — backoff exponencial
-    - Errores de red        — backoff exponencial
-    - 4xx permanentes       — fallo inmediato (sin reintentos)
+    - 503 (modelo cargando) - backoff exponencial
+    - 429 (rate-limit)      - backoff exponencial
+    - Errores de red        - backoff exponencial
+    - 4xx permanentes       - fallo inmediato (sin reintentos)
     """
     for attempt in range(_MAX_RETRIES):
         try:
@@ -143,10 +135,10 @@ def _generate_one(
             status = exc.response.status_code if exc.response is not None else 0
 
             if status == 503:
-                # Modelo cargando (cold start) — backoff generoso
+                # Modelo cargando (cold start) - backoff generoso
                 wait = _backoff(attempt + 2)  # empieza en 4s, sube a 120s
                 log.warning(
-                    "  ⏳ Modelo cargando (503). Esperando %.0fs (intento %d/%d)…",
+                    "  Modelo cargando (503). Esperando %.0fs (intento %d/%d)...",
                     wait, attempt + 1, _MAX_RETRIES,
                 )
                 time.sleep(wait)
@@ -154,7 +146,7 @@ def _generate_one(
             elif status == 429:
                 delay = _backoff(attempt + 1)
                 log.warning(
-                    "  ⚠️  Rate limit (429). Backoff %.0fs (intento %d/%d)…",
+                    "  Rate limit (429). Backoff %.0fs (intento %d/%d)...",
                     delay, attempt + 1, _MAX_RETRIES,
                 )
                 time.sleep(delay)
@@ -165,10 +157,10 @@ def _generate_one(
                 return None
 
             else:
-                # 5xx u otros — backoff y reintento
+                # 5xx u otros - backoff y reintento
                 delay = _backoff(attempt + 1)
                 log.warning(
-                    "  ✗ HTTP %d. Reintento %d/%d en %.0fs…",
+                    "  HTTP %d. Reintento %d/%d en %.0fs...",
                     status, attempt + 1, _MAX_RETRIES, delay,
                 )
                 time.sleep(delay)
@@ -176,7 +168,7 @@ def _generate_one(
         except Exception as exc:  # noqa: BLE001  (timeout, network error, etc.)
             delay = _backoff(attempt + 1)
             log.warning(
-                "  ✗ Error (%s). Reintento %d/%d en %.0fs…",
+                "  Error (%s). Reintento %d/%d en %.0fs...",
                 type(exc).__name__, attempt + 1, _MAX_RETRIES, delay,
             )
             time.sleep(delay)
@@ -185,9 +177,7 @@ def _generate_one(
     return None
 
 
-# ---------------------------------------------------------------------------
 # Main
-# ---------------------------------------------------------------------------
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -230,7 +220,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    # ── Token ────────────────────────────────────────────────────────────────
+    # Token
     hf_token: str | None = args.hf_token or os.getenv("HF_TOKEN") or os.getenv("HUGGING_FACE")
     if not hf_token:
         log.error(
@@ -278,7 +268,7 @@ def main() -> None:
                     # Progress indicator every 10 images
                     if img_num % 10 == 1 and img_num > 1:
                         log.info(
-                            "         … %d/%d generadas (✓%d  ✗%d)",
+                            "         ... %d/%d generadas (%d  %d)",
                             img_num - 1, target, prompt_kept, prompt_failed,
                         )
 
@@ -308,9 +298,9 @@ def main() -> None:
             summary[category] = cat_kept
             log.info("  → %s total: %d imágenes.", category, cat_kept)
 
-    # ── Resumen final ────────────────────────────────────────────────────────
+    # Resumen final
     print("\n" + "═" * 60)
-    print("  RESUMEN — imágenes generadas por categoría")
+    print("  RESUMEN - imagenes generadas por categoria")
     print("═" * 60)
     grand_total = 0
     for category, count in summary.items():

@@ -1,18 +1,18 @@
 """
-Seed data: classic Spanish hoaxes for bootstrapping the Qdrant knowledge base.
+Datos semilla: bulos clásicos en español para inicializar la base de conocimiento de Qdrant.
 
-Each entry is indexed on first ETL run (or when SEED_CLASSICS=true) so the
-bot can answer immediately about well-known viral messages without waiting for
-the RSS pipeline to surface them organically.
+Cada entrada se indexa en el primer ciclo ETL (o cuando SEED_CLASSICS=true) para que el bot
+pueda responder inmediatamente sobre mensajes virales conocidos sin esperar a que el
+pipeline RSS los traiga de forma orgánica.
 
-URLs marked # TODO: verificar URL have not been confirmed against the live site
-and should be reviewed before removing the TODO comment.
+Las URLs marcadas con # TODO: verificar URL no han sido confirmadas contra el sitio en vivo
+y deben revisarse antes de eliminar el comentario TODO.
 """
 from __future__ import annotations
 
 CLASSIC_HOAXES: list[dict] = [
 
-    # ── WhatsApp chain hoaxes ─────────────────────────────────────────────────
+    # WhatsApp chain hoaxes
 
     {
         "title": "WhatsApp pasará a ser de pago a partir del próximo mes",
@@ -55,7 +55,7 @@ CLASSIC_HOAXES: list[dict] = [
         "publish_date": "2020-01-01",
     },
 
-    # ── Archivos dañinos ──────────────────────────────────────────────────────
+    # Archivos dañinos
 
     {
         "title": "Audio de WhatsApp que formatea y destruye el teléfono móvil",
@@ -85,7 +85,7 @@ CLASSIC_HOAXES: list[dict] = [
         "publish_date": "2017-11-01",
     },
 
-    # ── Vales y descuentos falsos ─────────────────────────────────────────────
+    # Vales y descuentos falsos
 
     {
         "title": "Vale de descuento de 50 euros de Mercadona por WhatsApp",
@@ -126,7 +126,7 @@ CLASSIC_HOAXES: list[dict] = [
         "publish_date": "2020-06-01",
     },
 
-    # ── Fraudes telefónicos ───────────────────────────────────────────────────
+    # Fraudes telefónicos
 
     {
         "title": "Decir 'sí' al teléfono permite a hackers vaciar tu cuenta bancaria",
@@ -156,7 +156,7 @@ CLASSIC_HOAXES: list[dict] = [
         "publish_date": "2018-11-01",
     },
 
-    # ── Salud y tecnología ────────────────────────────────────────────────────
+    # Salud y tecnología
 
     {
         "title": "Las vacunas contra el COVID-19 contienen microchips de Bill Gates",
@@ -201,7 +201,7 @@ CLASSIC_HOAXES: list[dict] = [
         "publish_date": "2019-06-01",
     },
 
-    # ── Bulos sociales y electorales ─────────────────────────────────────────
+    # Bulos sociales y electorales
 
     {
         "title": "Los inmigrantes cobran más en subsidios que los pensionistas españoles",

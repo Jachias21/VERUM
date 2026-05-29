@@ -1,5 +1,5 @@
 """
-Tests for services/etl/app/pipeline.py
+Tests para services/etl/app/pipeline.py
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ pytest.importorskip("feedparser", reason="feedparser not installed (Docker-only 
 
 @pytest.fixture
 def valid_article():
-    """Base valid article that passes _validate_article."""
+    """Artículo base válido que supera _validate_article."""
     return {
         "title": "Este es un título válido de más de diez caracteres",
         "summary": "Este es un resumen suficientemente largo para pasar la validación.",
@@ -48,7 +48,7 @@ def test_validate_article_short_summary(valid_article):
 def test_validate_article_non_http_url(valid_article):
     from services.etl.app.pipeline import _validate_article
 
-    valid_article["url"] = "ftp://example.com/article"  # does not start with "http"
+    valid_article["url"] = "ftp://example.com/article"  # no empieza por "http"
     assert _validate_article(valid_article) is False
 
 
@@ -93,7 +93,7 @@ def test_infer_verdict_real_keyword_verified():
 
 
 def test_infer_verdict_factchecker_domain_without_keywords_is_unverified():
-    """Maldita.es URL without lexical signals → UNVERIFIED."""
+    """URL de Maldita.es sin señales léxicas → UNVERIFIED."""
     from services.etl.app.pipeline import _infer_verdict_from_entry
 
     entry = {
@@ -107,7 +107,7 @@ def test_infer_verdict_factchecker_domain_without_keywords_is_unverified():
 
 
 def test_infer_verdict_factchecker_domain_with_debunk_keywords_is_fake():
-    """Lexical FAKE signal beats domain class."""
+    """La señal léxica FAKE prevalece sobre la clase de dominio."""
     from services.etl.app.pipeline import _infer_verdict_from_entry
 
     entry = {
@@ -121,7 +121,7 @@ def test_infer_verdict_factchecker_domain_with_debunk_keywords_is_fake():
 
 
 def test_infer_verdict_institutional_domain_defaults_to_real():
-    """Moncloa URL without lexical FAKE signals → REAL."""
+    """URL de Moncloa sin señales FAKE léxicas → REAL."""
     from services.etl.app.pipeline import _infer_verdict_from_entry
 
     entry = {
@@ -135,7 +135,7 @@ def test_infer_verdict_institutional_domain_defaults_to_real():
 
 
 def test_infer_verdict_institutional_subdomain_defaults_to_real():
-    """Subdomains of institutional domains must also be recognized."""
+    """Los subdominios de dominios institucionales también deben reconocerse."""
     from services.etl.app.pipeline import _infer_verdict_from_entry
 
     entry = {

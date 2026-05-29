@@ -32,7 +32,7 @@ const translations = {
     },
 
     stats: [
-      { num: "<15s", label: "Tiempo de respuesta" },
+      { num: "<1min", label: "Tiempo de respuesta" },
       { num: "100%", label: "Privacidad garantizada" },
       { num: "2", label: "Motores de análisis" },
     ],
@@ -245,7 +245,7 @@ export default function WhatIsVerum() {
           }}
           className="bento-grid"
         >
-          {/* Card Analiza — span 2 cols, row 1 */}
+          {/* Tarjeta Analiza — span 2 cols, fila 1 */}
           <motion.div
             custom={0}
             variants={cardVariant}
@@ -266,7 +266,7 @@ export default function WhatIsVerum() {
               overflow: "hidden",
             }}
           >
-            {/* Left content */}
+            {/* Contenido izquierdo */}
             <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "1rem" }}>
               <div style={{ color: "var(--color-teal)" }}>
                 <IconSearch size={28} />
@@ -290,7 +290,7 @@ export default function WhatIsVerum() {
                 {t.analiza.desc}
               </p>
             </div>
-            {/* Right decorative number */}
+            {/* Número decorativo derecho */}
             <div style={{
               display: "flex",
               flexDirection: "column",
@@ -321,7 +321,7 @@ export default function WhatIsVerum() {
             </div>
           </motion.div>
 
-          {/* Card Verifica — col 3, row 1 */}
+          {/* Tarjeta Verifica — col 3, fila 1 */}
           <motion.div
             custom={0.1}
             variants={cardVariant}
@@ -361,7 +361,7 @@ export default function WhatIsVerum() {
             </p>
           </motion.div>
 
-          {/* Card Explica — col 1, row 2 */}
+          {/* Tarjeta Explica — col 1, fila 2 */}
           <motion.div
             custom={0.15}
             variants={cardVariant}
@@ -403,7 +403,7 @@ export default function WhatIsVerum() {
             </p>
           </motion.div>
 
-          {/* Card Protege — cols 2-3, row 2 */}
+          {/* Tarjeta Protege — cols 2-3, fila 2 */}
           <motion.div
             custom={0.2}
             variants={cardVariant}
@@ -422,7 +422,7 @@ export default function WhatIsVerum() {
               overflow: "hidden",
             }}
           >
-            {/* Left content */}
+            {/* Contenido izquierdo */}
             <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "1rem" }}>
               <div style={{ color: "var(--color-navy)" }}>
                 <IconHeartShield size={28} />
@@ -446,7 +446,7 @@ export default function WhatIsVerum() {
                 {t.protege.desc}
               </p>
             </div>
-            {/* Right decorative number */}
+            {/* Número decorativo derecho */}
             <div style={{
               display: "flex",
               flexDirection: "column",

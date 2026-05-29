@@ -1,8 +1,8 @@
 """
-VERUM Analytics Dashboard — Streamlit app.
-Connects to MongoDB and displays real-time usage metrics.
+Dashboard analítico de VERUM — aplicación Streamlit.
+Conecta a MongoDB y muestra métricas de uso en tiempo real.
 
-Run locally: streamlit run dashboard/app.py
+Ejecución local: streamlit run dashboard/app.py
 """
 import datetime
 import os
@@ -43,10 +43,10 @@ def load_data() -> pd.DataFrame:
 df = load_data()
 
 if df.empty:
-    st.info("No data yet. Start interacting with the bot.")
+    st.info("Aún no hay datos. Empieza a interactuar con el bot.")
     st.stop()
 
-# ── KPIs ─────────────────────────────────────────────────────────────────────
+# KPIs
 col1, col2, col3, col4 = st.columns(4)
 col1.metric("Total queries",    len(df))
 col2.metric("FAKE detected",    (df["final_verdict"] == "FAKE").sum())
@@ -55,7 +55,7 @@ col4.metric("Unique users",     df["user_hash"].nunique())
 
 st.divider()
 
-# ── Verdict distribution ──────────────────────────────────────────────────────
+# Distribución de veredictos
 c1, c2 = st.columns(2)
 with c1:
     st.subheader("Verdict distribution")
@@ -69,14 +69,14 @@ with c2:
     timeline = df.groupby("date").size().reset_index(name="count")
     st.plotly_chart(px.line(timeline, x="date", y="count"), use_container_width=True)
 
-# ── Entity word cloud + bar chart (text queries) ────────────────────────────
+# Entidades extraídas - nube de palabras y gráfico de barras
 st.subheader("Top extracted entities")
 text_df = df[df["payload_type"] == "text"].dropna(subset=["extracted_entities"])
 if not text_df.empty:
     all_entities = [e for row in text_df["extracted_entities"] for e in row]
     entity_counts = pd.Series(all_entities).value_counts()
 
-    # Use last-week data for the word cloud when enough queries are available
+    # Usar datos de la última semana para la nube de palabras si hay suficientes consultas
     week_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)
     recent_df = text_df[pd.to_datetime(text_df["timestamp"], utc=True) >= week_ago]
     if len(recent_df) >= 5:
@@ -116,7 +116,7 @@ if not text_df.empty:
         st.pyplot(fig_wc, use_container_width=True)
         plt.close(fig_wc)
 
-    # ── Bar chart (complementary, all-time top 20) ────────────────────────────
+    # Gráfico de barras (complementario, top 20 de todo el historial)
     entity_counts_df = entity_counts.head(20).reset_index()
     entity_counts_df.columns = ["entity", "count"]
     st.plotly_chart(
@@ -124,4 +124,4 @@ if not text_df.empty:
         use_container_width=True,
     )
 else:
-    st.info("No text queries with extracted entities yet.")
+    st.info("Aún no hay consultas de texto con entidades extraídas.")

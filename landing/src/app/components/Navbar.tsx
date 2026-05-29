@@ -36,7 +36,7 @@ export default function Navbar() {
       }`}
     >
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3">
-        {/* Left: Logo + Name */}
+        {/* Izquierda: Logo + Nombre */}
         <a href="#" className="flex items-center gap-2">
           <Image
             src="/logo.png"
@@ -50,9 +50,9 @@ export default function Navbar() {
           </span>
         </a>
 
-        {/* Right: Nav links + Lang selector + CTA */}
+        {/* Derecha: enlaces de nav + selector de idioma + CTA */}
         <div className="flex items-center gap-6">
-          {/* Navigation links — hidden on mobile */}
+          {/* Enlaces de navegación — ocultos en móvil */}
           <a
             href="#how"
             className="hidden text-sm font-medium text-text-secondary transition-colors hover:text-navy md:block"
@@ -66,7 +66,7 @@ export default function Navbar() {
             {t.whyVerum}
           </a>
 
-          {/* Language selector — hidden on mobile */}
+          {/* Selector de idioma — oculto en móvil */}
           <div className="hidden items-center gap-1 md:flex">
             <button
               onClick={() => setLang("es")}
@@ -90,7 +90,7 @@ export default function Navbar() {
             </button>
           </div>
 
-          {/* CTA Button */}
+          {/* Botón CTA */}
           <a
             href="https://t.me/Verum_tfm_bot"
             target="_blank"

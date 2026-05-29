@@ -1,8 +1,8 @@
 """
-Tests for services/worker_nlp/app/cache.py
+Tests para services/worker_nlp/app/cache.py
 
-MongoDB is mocked completely — no running database required.
-The entire module is skipped when motor is not installed (outside Docker).
+MongoDB está completamente mockeado — no se requiere base de datos en ejecución.
+El módulo completo se omite si motor no está instalado (fuera de Docker).
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# Skip every test in this module when motor (async MongoDB driver) is absent
+# Omitir todos los tests de este módulo si motor (driver MongoDB async) no está instalado
 pytest.importorskip("motor")
 
 from shared.schemas import NLPResult  # noqa: E402 — after importorskip guard
@@ -33,7 +33,7 @@ def _make_nlp_result(verdict: str = "FAKE") -> NLPResult:
 
 
 def _make_mock_collection() -> MagicMock:
-    """Return a MagicMock whose async methods are AsyncMocks."""
+    """Devuelve un MagicMock cuyos métodos async son AsyncMocks."""
     col = MagicMock()
     col.find_one = AsyncMock()
     col.update_one = AsyncMock()
@@ -47,18 +47,18 @@ def _make_mock_db(collection: MagicMock) -> MagicMock:
     return db
 
 
-# ── Fixtures ──────────────────────────────────────────────────────────────────
+# ── Fixtures ─────────────────────────────────────────────────────────────────
 
 @pytest.fixture(autouse=True)
 def reset_index_flag():
-    """Reset the _INDEX_CREATED module flag before and after every test."""
+    """Reinicia el flag del módulo _INDEX_CREATED antes y después de cada test."""
     import services.worker_nlp.app.cache as cache_mod
     cache_mod._INDEX_CREATED = False
     yield
     cache_mod._INDEX_CREATED = False
 
 
-# ── Test 1: cache HIT — existing, non-expired document → NLPResult ───────────
+# ── Test 1: cache HIT — documento existente no expirado → NLPResult ─────────
 
 async def test_get_cached_verdict_hit():
     from services.worker_nlp.app.cache import get_cached_verdict

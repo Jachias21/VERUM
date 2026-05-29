@@ -32,7 +32,7 @@ export default function Hero() {
       id="hero"
       className="relative overflow-hidden bg-white pt-24 pb-16 md:pt-32 md:pb-24"
     >
-      {/* Decorative blob */}
+      {/* Blob decorativo */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute -top-20 -right-20 h-[500px] w-[500px] rounded-full bg-teal-light opacity-30"
@@ -40,7 +40,7 @@ export default function Hero() {
       />
 
       <div className="relative mx-auto grid max-w-7xl grid-cols-1 items-center gap-12 px-6 md:grid-cols-2">
-        {/* Left column — Text */}
+        {/* Columna izquierda — Texto */}
         <div className="flex flex-col items-start gap-6">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -76,7 +76,7 @@ export default function Hero() {
             transition={{ duration: 0.5, delay: 0.3 }}
             className="flex flex-wrap gap-4"
           >
-            {/* Primary CTA */}
+            {/* CTA principal */}
             <a
               href="https://t.me/Verum_tfm_bot"
               target="_blank"
@@ -91,7 +91,7 @@ export default function Hero() {
               </span>
             </a>
 
-            {/* Secondary CTA */}
+            {/* CTA secundario */}
             <a
               href="#how"
               id="hero-cta-secondary"
@@ -102,7 +102,7 @@ export default function Hero() {
           </motion.div>
         </div>
 
-        {/* Right column — Mascot */}
+        {/* Columna derecha — Mascota */}
         <motion.div
           initial={{ opacity: 0, y: 40 }}
           animate={{ opacity: 1, y: 0 }}

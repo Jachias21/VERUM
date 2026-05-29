@@ -46,7 +46,7 @@ export default function WhyVerum() {
   return (
     <section id="why" className="bg-navy py-24">
       <div className="mx-auto grid max-w-7xl grid-cols-1 items-center gap-12 px-6 md:grid-cols-2">
-        {/* Left — Text */}
+        {/* Izquierda — Texto */}
         <div>
           <motion.span
             initial={{ opacity: 0, y: 20 }}
@@ -77,7 +77,7 @@ export default function WhyVerum() {
             {t.paragraph}
           </motion.p>
 
-          {/* Problem bullets */}
+          {/* Puntos del problema */}
           <motion.ul
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
@@ -95,7 +95,7 @@ export default function WhyVerum() {
             ))}
           </motion.ul>
 
-          {/* Solution bullets */}
+          {/* Puntos de la solución */}
           <motion.ul
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
@@ -114,7 +114,7 @@ export default function WhyVerum() {
           </motion.ul>
         </div>
 
-        {/* Right — Mascot */}
+        {/* Derecha — Mascota */}
         <motion.div
           initial={{ opacity: 0, x: 40 }}
           whileInView={{ opacity: 1, x: 0 }}

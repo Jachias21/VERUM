@@ -1,5 +1,5 @@
 """
-Shared pytest fixtures for all test modules.
+Fixtures de pytest compartidas para todos los módulos de test.
 """
 from __future__ import annotations
 
@@ -10,11 +10,11 @@ import pytest
 from shared.schemas import NLPResult, TextTask
 
 
-# ── SpaCy model (session-scoped to avoid reloading on each test) ──────────────
+#  Modelo SpaCy (scope de sesión para evitar recarga en cada test) 
 
 @pytest.fixture(scope="session")
 def spacy_model():
-    """Load es_core_news_lg once per test session."""
+    """Carga es_core_news_lg una sola vez por sesión de test."""
     try:
         import spacy
         return spacy.load("es_core_news_lg")
@@ -22,11 +22,11 @@ def spacy_model():
         return None
 
 
-# ── Domain fixtures ───────────────────────────────────────────────────────────
+#  Fixtures de dominio 
 
 @pytest.fixture
 def sample_text_task() -> TextTask:
-    """A realistic TextTask with a text long enough to pass NLP_MIN_TEXT_LENGTH."""
+    """TextTask realista con texto suficientemente largo para superar NLP_MIN_TEXT_LENGTH."""
     return TextTask(
         query_id=uuid.uuid4(),
         user_hash="a" * 64,
@@ -41,7 +41,7 @@ def sample_text_task() -> TextTask:
 
 @pytest.fixture
 def mock_nlp_result() -> NLPResult:
-    """An NLPResult with both retrieved_context and summary populated."""
+    """NLPResult con retrieved_context y summary rellenos."""
     return NLPResult(
         query_id=uuid.uuid4(),
         extracted_entities=["Madrid", "Gobierno de España"],
@@ -55,7 +55,7 @@ def mock_nlp_result() -> NLPResult:
 
 @pytest.fixture
 def mock_qdrant_hits() -> list[dict]:
-    """Simulated Qdrant hit list with the fields used by hybrid_search."""
+    """Lista simulada de hits de Qdrant con los campos usados por hybrid_search."""
     return [
         {
             "score": 0.92,

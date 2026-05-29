@@ -24,9 +24,7 @@ from torchvision import datasets, transforms
 from architecture import TwoStreamCNN
 from preprocess import batch_to_freq_tensors
 
-# ---------------------------------------------------------------------------
-# MLflow — opcional; el script funciona sin él
-# ---------------------------------------------------------------------------
+# MLflow - opcional; el script funciona sin el
 try:
     import mlflow
     import mlflow.pytorch
@@ -85,7 +83,7 @@ def train(
     device = get_device()
     print(f"[train] Usando dispositivo: {device}")
 
-    # ── MLflow run ───────────────────────────────────────────────────────────
+    # MLflow run
     _mlflow_enabled = _mlflow_available
     if _mlflow_enabled:
         mlflow.set_tracking_uri(mlflow_uri)
@@ -100,14 +98,14 @@ def train(
         })
         print(f"[train] MLflow tracking activado → {mlflow_uri}")
     else:
-        print("[train] mlflow no instalado — tracking desactivado.")
+        print("[train] mlflow no instalado - tracking desactivado.")
 
     model = TwoStreamCNN(pretrained=True).to(device)
 
-    # ── Fine-tuning: congelar backbone espacial inicialmente ─────────────────
+    # Fine-tuning: congelar backbone espacial inicialmente
     for name, param in model.spatial_branch.named_parameters():
         param.requires_grad = False
-    print("[train] Backbone EfficientNet congelado — solo se entrenan head y rama frecuencial")
+    print("[train] Backbone EfficientNet congelado - solo se entrenan head y rama frecuencial")
 
     train_ds = datasets.ImageFolder(data_root / "train", transform=get_transforms(train=True))
     val_ds   = datasets.ImageFolder(data_root / "val",   transform=get_transforms(train=False))
@@ -128,14 +126,14 @@ def train(
 
     for epoch in range(1, epochs + 1):
 
-        # ── Descongelar backbone en epoch 3 ──────────────────────────────────
+        # Descongelar backbone en epoch 3
         if epoch == 3:
             for param in model.spatial_branch.parameters():
                 param.requires_grad = True
             optimizer = torch.optim.AdamW(model.parameters(), lr=lr / 10, weight_decay=1e-4)
-            print("[train] Epoch 3 — backbone descongelado, fine-tuning completo con lr reducido")
+            print("[train] Epoch 3 - backbone descongelado, fine-tuning completo con lr reducido")
 
-        # ── Training loop ─────────────────────────────────────────────────────
+        # Training loop
         model.train()
         train_loss, train_correct, train_total = 0.0, 0, 0
 
@@ -158,7 +156,7 @@ def train(
 
         scheduler.step()
 
-        # ── Validation loop ───────────────────────────────────────────────────
+        # Validation loop
         model.eval()
         val_correct, val_total = 0, 0
 
@@ -177,13 +175,13 @@ def train(
         avg_loss  = train_loss    / train_total
 
         print(
-            f"Epoch {epoch:02d}/{epochs} — "
-            f"loss: {avg_loss:.4f} — "
-            f"train_acc: {train_acc:.4f} — "
+            f"Epoch {epoch:02d}/{epochs} - "
+            f"loss: {avg_loss:.4f} - "
+            f"train_acc: {train_acc:.4f} - "
             f"val_acc: {val_acc:.4f}"
         )
 
-        # ── MLflow métricas por epoch ─────────────────────────────────────────
+        # MLflow métricas por epoch
         if _mlflow_enabled:
             mlflow.log_metrics(
                 {

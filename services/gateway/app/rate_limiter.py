@@ -1,13 +1,13 @@
 """
-Rate limiter backed by MongoDB.
+Rate limiter respaldado por MongoDB.
 
-Uses a `rate_limits` collection with documents {user_hash, window_start, count}.
-A TTL index on `window_start` (expireAfterSeconds=120) keeps the collection clean
-without any manual housekeeping.
+Usa una colección `rate_limits` con documentos {user_hash, window_start, count}.
+Un índice TTL sobre `window_start` (expireAfterSeconds=120) mantiene limpia la
+colección sin mantenimiento manual.
 
-Environment variables:
-  RATE_LIMIT_MAX_REQUESTS   — max requests per window (default: 10)
-  RATE_LIMIT_WINDOW_SECONDS — length of the sliding window in seconds (default: 60)
+Variables de entorno:
+  RATE_LIMIT_MAX_REQUESTS   - máximo de peticiones por ventana (por defecto: 10)
+  RATE_LIMIT_WINDOW_SECONDS - duración de la ventana deslizante en segundos (por defecto: 60)
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ _index_ensured = False
 
 
 async def _ensure_ttl_index() -> None:
-    """Create the TTL index on first use (idempotent — MongoDB ignores duplicate index calls)."""
+    """Crea el índice TTL en el primer uso (idempotente - MongoDB ignora llamadas de índice duplicadas)."""
     global _index_ensured
     if _index_ensured:
         return
@@ -35,14 +35,12 @@ async def _ensure_ttl_index() -> None:
         await db[_COLLECTION].create_index("window_start", expireAfterSeconds=120, background=True)
         _index_ensured = True
     except Exception as exc:  # noqa: BLE001
-        logger.warning("rate_limiter: could not ensure TTL index — %s", exc)
+        logger.warning("rate_limiter: no se pudo asegurar el índice TTL - %s", exc)
 
 
 async def check_rate_limit(user_hash: str) -> bool:
-    """Return True if the request is within limits, False if the user is rate-limited.
-
-    Fails open: if MongoDB is unavailable, returns True so legitimate users are
-    not blocked by infrastructure problems.
+    """Devuelve True si la petición está dentro del límite, False si el usuario ha sido limitado.
+    Falla abierto: si MongoDB no está disponible, devuelve True para no bloquear a usuarios legítimos.
     """
     max_requests = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "10"))
     window_seconds = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
@@ -55,8 +53,6 @@ async def check_rate_limit(user_hash: str) -> bool:
         db = get_mongo_db()
         collection = db[_COLLECTION]
 
-        # Atomically increment count if a document for this user exists within the
-        # current window. Returns the updated document (after update).
         doc = await collection.find_one_and_update(
             {"user_hash": user_hash, "window_start": {"$gte": cutoff}},
             {"$inc": {"count": 1}},
@@ -65,7 +61,6 @@ async def check_rate_limit(user_hash: str) -> bool:
         )
 
         if doc is None:
-            # No in-window document: start a fresh window for this user.
             await collection.update_one(
                 {"user_hash": user_hash},
                 {"$set": {"window_start": now, "count": 1}},
@@ -76,11 +71,11 @@ async def check_rate_limit(user_hash: str) -> bool:
         allowed = doc["count"] <= max_requests
         if not allowed:
             logger.warning(
-                "rate_limiter: user_hash=%.12s… exceeded %d requests in %ds (count=%d)",
+                "rate_limiter: user_hash=%.12s... superó %d peticiones en %ds (count=%d)",
                 user_hash, max_requests, window_seconds, doc["count"],
             )
         return allowed
 
     except Exception as exc:  # noqa: BLE001
-        logger.error("rate_limiter: MongoDB error — failing open. %s: %s", type(exc).__name__, exc)
-        return True  # fail open
+        logger.error("rate_limiter: error MongoDB - falla abierto. %s: %s", type(exc).__name__, exc)
+        return True  # falla abierto

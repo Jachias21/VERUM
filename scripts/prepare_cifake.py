@@ -2,7 +2,7 @@ import shutil
 import random
 from pathlib import Path
 
-# ── Configuración ─────────────────────────────────────────────────────────────
+# Configuración
 CIFAKE_ROOT = Path("data/raw")  
 OUTPUT_ROOT = Path("data/processed")
 VAL_RATIO   = 0.15

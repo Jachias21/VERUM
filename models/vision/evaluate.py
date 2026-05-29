@@ -1,23 +1,23 @@
 """
-Evaluation script for TwoStreamCNN.
+Script de evaluación para TwoStreamCNN.
 
-Loads verum_cnn_best.pt, runs inference on data/processed/test/,
-computes Accuracy, F1, AUC and confusion matrix, and optionally
-exports the model to ONNX (opset 17).
+Carga verum_cnn_best.pt, ejecuta inferencia sobre data/processed/test/,
+calcula Accuracy, F1, AUC y matriz de confusión, y opcionalmente
+exporta el modelo a ONNX (opset 17).
 
-Dataset layout expected:
+Estructura del dataset esperada:
   data/processed/test/
-    real/  <images>
-    fake/  <images>
+    real/  <imágenes>
+    fake/  <imágenes>
 
-Usage:
-  # Evaluate only
+Uso:
+  # Solo evaluación
   python models/vision/evaluate.py
 
-  # Evaluate + export ONNX
+  # Evaluación + exportar ONNX
   python models/vision/evaluate.py --export-onnx
 
-  # Custom paths
+  # Rutas personalizadas
   python models/vision/evaluate.py \\
       --checkpoint weights/verum_cnn_best.pt \\
       --data-root  ../../data/processed \\
@@ -44,9 +44,7 @@ from architecture import TwoStreamCNN
 from preprocess import batch_to_freq_tensors
 from train import get_transforms
 
-# ---------------------------------------------------------------------------
-# MLflow — opcional; solo logueamos si hay un run activo
-# ---------------------------------------------------------------------------
+# MLflow - opcional; solo logueamos si hay un run activo
 try:
     import mlflow
     _mlflow_available = True
@@ -54,9 +52,7 @@ except ImportError:
     _mlflow_available = False
 
 
-# ---------------------------------------------------------------------------
 # Helpers
-# ---------------------------------------------------------------------------
 
 def get_device() -> torch.device:
     """Detecta automáticamente CUDA → MPS → CPU."""
@@ -90,9 +86,7 @@ def _print_confusion_matrix(cm: np.ndarray, class_names: list[str]) -> None:
         print(row)
 
 
-# ---------------------------------------------------------------------------
 # Core
-# ---------------------------------------------------------------------------
 
 def evaluate(
     checkpoint: Path,
@@ -101,11 +95,11 @@ def evaluate(
     batch_size: int = 32,
     num_workers: int = 4,
 ) -> None:
-    # ── Dispositivo ─────────────────────────────────────────────────────────
+    # Dispositivo
     device = get_device()
     print(f"\n[evaluate] Dispositivo: {device}")
 
-    # ── Checkpoint ───────────────────────────────────────────────────────────
+    # Checkpoint
     if not checkpoint.is_file():
         print(
             f"[evaluate] ERROR: Checkpoint no encontrado en '{checkpoint}'.\n"
@@ -118,7 +112,7 @@ def evaluate(
     model = _load_model(checkpoint, device)
     print(f"[evaluate] Modelo cargado correctamente.\n")
 
-    # ── Dataset ──────────────────────────────────────────────────────────────
+    # Dataset
     test_dir = data_root / "test"
     if not test_dir.is_dir():
         print(
@@ -146,7 +140,7 @@ def evaluate(
         f"| Total muestras: {len(test_ds)}\n"
     )
 
-    # ── Inferencia ───────────────────────────────────────────────────────────
+    # Inferencia
     all_labels: list[int]   = []
     all_preds:  list[int]   = []
     all_scores: list[float] = []
@@ -178,7 +172,7 @@ def evaluate(
             if batch_idx % 10 == 0 or batch_idx == len(test_dl):
                 print(f"  Batch {batch_idx:>4d}/{len(test_dl)} procesado.")
 
-    # ── Métricas ─────────────────────────────────────────────────────────────
+    # Métricas
     acc  = accuracy_score(all_labels, all_preds)
     f1   = f1_score(all_labels, all_preds, zero_division=0)
     auc  = roc_auc_score(all_labels, all_scores)
@@ -187,7 +181,7 @@ def evaluate(
     class_names = ["REAL", "FAKE"]  # 0 = real, 1 = fake (binarizado arriba)
 
     _print_separator("═")
-    print("  EVALUACIÓN TwoStreamCNN — VERUM")
+    print("  EVALUACIÓN TwoStreamCNN - VERUM")
     _print_separator("═")
     print(f"  Checkpoint  : {checkpoint}")
     print(f"  Test set    : {test_dir}  ({len(test_ds)} imágenes)")
@@ -207,7 +201,7 @@ def evaluate(
     print(f"    Recall    = {tp/(tp+fn) if (tp+fn)>0 else 0:.4f}")
     _print_separator("═")
 
-    # ── Exportar a ONNX ──────────────────────────────────────────────────────
+    # Exportar a ONNX
     if export_onnx:
         _export_onnx(model, checkpoint, device)
 
@@ -251,14 +245,12 @@ def _export_onnx(model: TwoStreamCNN, checkpoint: Path, device: torch.device) ->
             active_run = mlflow.active_run()
             if active_run:
                 mlflow.log_artifact(str(onnx_path))
-                print(f"[evaluate] MLflow: ONNX registrado como artefacto en run {active_run.info.run_id[:8]}…")
+                print(f"[evaluate] MLflow: ONNX registrado como artefacto en run {active_run.info.run_id[:8]}...")
         except Exception as exc:  # noqa: BLE001
             print(f"[evaluate] Advertencia MLflow: {exc}")
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

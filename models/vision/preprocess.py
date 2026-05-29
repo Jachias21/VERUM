@@ -1,5 +1,5 @@
 """
-Preprocesado de la rama frecuencial — Two-Stream CNN.
+Preprocesado de la rama frecuencial - Two-Stream CNN.
 
 Convierte una imagen RGB en un tensor de frecuencias (2, H, W)
 extrayendo los canales de crominancia Cb y Cr en el espacio YCbCr,
@@ -13,7 +13,7 @@ import torch
 def rgb_to_freq_tensor(img_rgb: np.ndarray, size: int = 224) -> torch.Tensor:
     """
     Entrada : imagen RGB (H, W, 3) en uint8
-    Salida  : tensor (2, size, size) float32 normalizado — rama frecuencial
+    Salida  : tensor (2, size, size) float32 normalizado - rama frecuencial
     """
     # 1. Redimensionar
     img = cv2.resize(img_rgb, (size, size))
@@ -56,7 +56,7 @@ def _apply_dft_highpass(channel: np.ndarray) -> np.ndarray:
     # Filtro paso alto: anular cuadrado central
     h, w = magnitude.shape
     cy, cx = h // 2, w // 2
-    r = min(h, w) // 8          # radio del filtro — cubre ~12% del espectro
+    r = min(h, w) // 8          # radio del filtro - cubre ~12% del espectro
     magnitude[cy - r:cy + r, cx - r:cx + r] = 0.0
 
     return magnitude

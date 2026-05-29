@@ -1,9 +1,9 @@
 """
-VERUM Gateway — FastAPI entry point.
+VERUM Gateway - punto de entrada FastAPI.
 
-Responsibilities:
-  - Receive Telegram webhook POSTs and respond 200 OK immediately.
-  - Delegate routing logic to router.py (no heavy work here).
+Responsabilidades:
+  - Recibir POSTs del webhook de Telegram y responder 200 OK inmediatamente.
+  - Delegar la lógica de enrutamiento a router.py.
 """
 import asyncio
 import hashlib
@@ -30,7 +30,6 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ── startup ──────────────────────────────────────────────────────────────
     webhook_base = os.getenv("WEBHOOK_BASE_URL", "").strip()
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     secret = os.getenv("TELEGRAM_WEBHOOK_SECRET", "").strip()
@@ -45,22 +44,21 @@ async def lifespan(app: FastAPI):
             )
             logger.info("[gateway] Webhook registrado en %s", webhook_url)
         except asyncio.TimeoutError:
-            logger.error("[gateway] set_webhook timeout — Telegram no respondió en 5 s")
+            logger.error("[gateway] set_webhook timeout - Telegram no respondio en 5 s")
         except TelegramError as exc:
-            logger.error("[gateway] set_webhook falló — %s: %s", type(exc).__name__, exc)
+            logger.error("[gateway] set_webhook fallo - %s: %s", type(exc).__name__, exc)
     else:
-        logger.info("[gateway] WEBHOOK_BASE_URL no configurada — registro automático omitido")
+        logger.info("[gateway] WEBHOOK_BASE_URL no configurada - registro automatico omitido")
 
     yield
 
-    # ── shutdown ──────────────────────────────────────────────────────────────
     if token:
         try:
             bot = Bot(token=token)
             await asyncio.wait_for(bot.delete_webhook(), timeout=5)
             logger.info("[gateway] Webhook eliminado")
         except Exception as exc:  # noqa: BLE001
-            logger.warning("[gateway] delete_webhook falló — %s", exc)
+            logger.warning("[gateway] delete_webhook falló - %s", exc)
 
 
 app = FastAPI(title="VERUM Gateway", version="0.1.0", lifespan=lifespan)
@@ -96,7 +94,7 @@ _FEEDBACK_NOT_FOUND = (
 
 
 async def _handle_feedback(chat_id: int, user_id: str, argument: str) -> None:
-    """Process /feedback command: update the latest QueryLog for this user."""
+    """Procesa el comando /feedback: actualiza el último QueryLog del usuario."""
     argument = argument.strip().lower()
 
     if argument not in ("correcto", "incorrecto"):
@@ -124,21 +122,21 @@ async def _handle_feedback(chat_id: int, user_id: str, argument: str) -> None:
         reply = _FEEDBACK_POSITIVE if feedback_value == "correct" else _FEEDBACK_NEGATIVE
         await _send_command_reply(chat_id, reply)
     except Exception as exc:  # noqa: BLE001
-        logger.error("_handle_feedback: MongoDB error — %s: %s", type(exc).__name__, exc)
+        logger.error("_handle_feedback: MongoDB error - %s: %s", type(exc).__name__, exc)
         await _send_command_reply(chat_id, "⚠️ Error al guardar el feedback. Inténtalo de nuevo.")
 
 
 async def _send_command_reply(chat_id: int, text: str) -> None:
-    """Send a reply to a bot command via Telegram, silently ignoring failures."""
+    """Envía una respuesta a un comando del bot por Telegram, ignorando silenciosamente los errores."""
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
-        logger.warning("_send_command_reply: TELEGRAM_BOT_TOKEN not set — skipping reply to chat_id=%s", chat_id)
+        logger.warning("_send_command_reply: TELEGRAM_BOT_TOKEN no configurado - omitiendo respuesta a chat_id=%s", chat_id)
         return
     try:
         bot = Bot(token=token)
         await bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown")
     except Exception as e:  # noqa: BLE001
-        logger.warning("_send_command_reply: failed to send to chat_id=%s — %s: %s", chat_id, type(e).__name__, e)
+        logger.warning("_send_command_reply: failed to send to chat_id=%s - %s: %s", chat_id, type(e).__name__, e)
 
 
 class TextRequest(BaseModel):
@@ -187,7 +185,6 @@ async def telegram_webhook(
             asyncio.create_task(_handle_feedback(chat_id, user_id, argument))
         return {"ok": True}
 
-    # Fire-and-forget: publish to queue and return 200 immediately
     await route_message(payload)
     return {"ok": True}
 

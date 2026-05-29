@@ -1,10 +1,10 @@
 """
-Integration tests for the NLP worker pipeline end-to-end.
+Tests de integración para el pipeline del worker NLP de extremo a extremo.
 
-All external dependencies (Qdrant, Ollama, Telegram, MongoDB) are replaced
-with async/sync mocks so the suite runs without Docker.
+Todas las dependencias externas (Qdrant, Ollama, Telegram, MongoDB) se sustituyen
+con mocks async/sync para que el suite funcione sin Docker.
 
-Run with: pytest tests/test_integration/ -v
+Ejecutar con: pytest tests/test_integration/ -v
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ _VIRAL_TEXT = (
 def _make_task(text: str = _VIRAL_TEXT, chat_id: int = 42) -> TextTask:
     return TextTask(
         query_id=uuid.uuid4(),
-        user_hash="aabbccdd" + "0" * 56,  # 64-char SHA-256-shaped string
+    user_hash="aabbccdd" + "0" * 56,  # cadena de 64 chars con forma SHA-256
         chat_id=chat_id,
         text=text,
         timestamp=datetime.datetime.now(datetime.timezone.utc),
@@ -38,7 +38,7 @@ def _make_task(text: str = _VIRAL_TEXT, chat_id: int = 42) -> TextTask:
 
 
 class _AsyncNoopContext:
-    """Async context manager that does nothing — simulates message.process()."""
+    """Gestor de contexto async que no hace nada — simula message.process()."""
 
     async def __aenter__(self):
         return None
@@ -48,7 +48,7 @@ class _AsyncNoopContext:
 
 
 class FakeMessage:
-    """Minimal stub for aio_pika.abc.AbstractIncomingMessage."""
+    """Stub mínimo para aio_pika.abc.AbstractIncomingMessage."""
 
     def __init__(self, task: TextTask) -> None:
         self.body = task.model_dump_json().encode()
@@ -58,7 +58,7 @@ class FakeMessage:
 
 
 def _make_mongo_mock() -> MagicMock:
-    """Return a motor-compatible database mock with an async insert_one."""
+    """Devuelve un mock de base de datos compatible con motor con insert_one async."""
     collection = MagicMock()
     collection.insert_one = AsyncMock()
     db = MagicMock()
@@ -67,7 +67,7 @@ def _make_mongo_mock() -> MagicMock:
 
 
 def _make_mongo_mock_failing() -> MagicMock:
-    """Return a MongoDB mock where insert_one raises to simulate a connectivity failure."""
+    """Devuelve un mock MongoDB donde insert_one lanza para simular un fallo de conectividad."""
     collection = MagicMock()
     collection.insert_one = AsyncMock(side_effect=Exception("MongoDB unreachable"))
     db = MagicMock()
@@ -76,20 +76,20 @@ def _make_mongo_mock_failing() -> MagicMock:
 
 
 def _sent_text(mock_send: AsyncMock) -> str:
-    """Extract the 'text' kwarg from the first Bot.send_message call."""
+    """Extrae el kwarg 'text' de la primera llamada a Bot.send_message."""
     return mock_send.call_args.kwargs["text"]
 
 
 def _make_synth_mock(summary: str) -> AsyncMock:
-    """Return an AsyncMock for synthesize_verdict that sets result.summary in-place
-    and returns the modified NLPResult — matching the real function's API."""
+    """Devuelve un AsyncMock para synthesize_verdict que establece result.summary en el objeto
+    y devuelve el NLPResult modificado — replicando la API de la función real."""
     async def _side_effect(result, text):  # noqa: ANN001
         result.summary = summary
         return result
     return AsyncMock(side_effect=_side_effect)
 
 
-# ── Test 1: high-confidence L1 Qdrant hit → FAKE verdict ─────────────────────
+# ── Test 1: hit L1 Qdrant de alta confianza → veredicto FAKE ─────────────────
 
 @pytest.mark.asyncio
 async def test_full_pipeline_fake_verdict():
@@ -131,11 +131,11 @@ async def test_full_pipeline_fake_verdict():
     assert "FAKE" in text
 
 
-# ── Test 2: all sources empty → UNVERIFIED + maldita.es fallback ─────────────
+# ── Test 2: todas las fuentes vacías → UNVERIFIED + fallback maldita.es ────────
 
 @pytest.mark.asyncio
 async def test_full_pipeline_unverified_no_hits():
-    """Zero-day hoax: no Qdrant hit, no Google FC, no GNews → UNVERIFIED reply."""
+    """Bulo de cer-o día: sin hit en Qdrant, Google FC ni GNews → respuesta UNVERIFIED."""
     from services.worker_nlp.app.worker import process
 
     task = _make_task()
@@ -167,11 +167,11 @@ async def test_full_pipeline_unverified_no_hits():
     assert any(site in text for site in ("maldita.es", "newtral.es", "snopes.com"))
 
 
-# ── Test 3: gibberish input → pipeline aborted, no Qdrant call ───────────────
+# ── Test 3: entrada sin sentido → pipeline abortado, sin llamada a Qdrant ─────
 
 @pytest.mark.asyncio
 async def test_full_pipeline_gibberish_rejected():
-    """Incoherent input must short-circuit at NER without touching Qdrant."""
+    """Una entrada incoherente debe cortocircuitar en NER sin tocar Qdrant."""
     from services.worker_nlp.app.worker import process
 
     task = _make_task(text="asdf qwer zxcv 1234 !! foo bar baz")
@@ -195,11 +195,11 @@ async def test_full_pipeline_gibberish_rejected():
     assert "⚠️" in text or "entender" in text
 
 
-# ── Test 4: cached verdict → pipeline short-circuited, no Qdrant call ─────────
+# ── Test 4: veredicto en caché → pipeline cortocircuitado, sin llamada a Qdrant ──
 
 @pytest.mark.asyncio
 async def test_full_pipeline_cache_hit():
-    """A cache hit must skip the search pipeline and add the ⚡ indicator."""
+    """Un hit en caché debe omitir el pipeline de búsqueda y añadir el indicador ⚡."""
     from services.worker_nlp.app.worker import process
 
     task = _make_task()
@@ -237,12 +237,12 @@ async def test_full_pipeline_cache_hit():
     assert "⚡" in text
 
 
-# ── Test 5: Ollama timeout → worker catches it, sends ⚠️, no crash ──────────
+# ── Test 5: timeout de Ollama → worker lo captura, envía ⚠️, sin crash ───────
 
 @pytest.mark.asyncio
 async def test_pipeline_ollama_timeout_sends_error_reply():
-    """asyncio.TimeoutError raised by synthesize_verdict must be caught;
-    the user receives ⚠️ and the worker does not propagate the exception."""
+    """asyncio.TimeoutError lanzado por synthesize_verdict debe capturarse;
+    el usuario recibe ⚠️ y el worker no propaga la excepción."""
     from services.worker_nlp.app.worker import process
 
     task = _make_task()
@@ -284,11 +284,11 @@ async def test_pipeline_ollama_timeout_sends_error_reply():
     assert "⚠️" in text
 
 
-# ── Test 6: Malformed LLM output → RAG verdict preserved ─────────────────────
+# ── Test 6: salida LLM malformada → veredicto RAG preservado ───────────────────
 
 @pytest.mark.asyncio
 async def test_pipeline_malformed_llm_keeps_rag_verdict():
-    """LLM output without a VEREDICTO: tag must not override the RAG verdict."""
+    """La salida del LLM sin etiqueta VEREDICTO: no debe sobreescribir el veredicto RAG."""
     from services.worker_nlp.app.worker import process
 
     task = _make_task()
@@ -300,7 +300,7 @@ async def test_pipeline_malformed_llm_keeps_rag_verdict():
         fact_check_matches=1,
         source_url="https://maldita.es/test",
         verdict="FAKE",
-        retrieved_context="Context from the knowledge base.",
+        retrieved_context="Contexto de la base de conocimiento.",
         summary="",
     )
 

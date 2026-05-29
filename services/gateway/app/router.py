@@ -1,6 +1,6 @@
 """
-Message router — classifies incoming Telegram payloads and publishes
-tasks to the appropriate RabbitMQ queue.
+Enrutador de mensajes - clasifica los payloads entrantes de Telegram y publica
+tareas en la cola RabbitMQ correspondiente.
 """
 import asyncio
 import os
@@ -20,11 +20,11 @@ logger = logging.getLogger(__name__)
 
 
 async def _send_interim_message(chat_id: int, text: str) -> None:
-    """Send a fire-and-forget acknowledgment to the user via Telegram."""
+    """Envía un acuse de recibo al usuario vía Telegram (fire-and-forget)."""
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
         logger.warning(
-            "_send_interim_message: TELEGRAM_BOT_TOKEN not set — skipping interim to chat_id=%s",
+            "_send_interim_message: TELEGRAM_BOT_TOKEN no configurado - omitiendo interim a chat_id=%s",
             chat_id,
         )
         return
@@ -33,12 +33,11 @@ async def _send_interim_message(chat_id: int, text: str) -> None:
         await bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown")
     except Exception as e:  # noqa: BLE001
         logger.warning(
-            "_send_interim_message: failed to send interim to chat_id=%s — %s: %s",
+            "_send_interim_message: error al enviar interim a chat_id=%s - %s: %s",
             chat_id, type(e).__name__, e,
         )
 
 
-# Lazy singleton connection
 _connection: aio_pika.abc.AbstractRobustConnection | None = None
 _amqp_url_logged = False
 
@@ -52,8 +51,8 @@ async def _get_channel() -> aio_pika.abc.AbstractChannel:
     if _connection is None or _connection.is_closed:
         _connection = await aio_pika.connect_robust(url)
     channel = await _connection.channel()
-    # Declare queues as durable so messages survive broker restarts and are not
-    # lost if the gateway starts before the workers.
+    # Declarar las colas como durable para que los mensajes sobrevivan reinicios del broker
+    # y no se pierdan si el gateway arranca antes que los workers.
     await channel.declare_queue(os.getenv("RABBITMQ_QUEUE_IMAGES", "topic_images"), durable=True)
     await channel.declare_queue(os.getenv("RABBITMQ_QUEUE_TEXTS", "topic_texts"), durable=True)
     return channel
@@ -62,7 +61,7 @@ async def _get_channel() -> aio_pika.abc.AbstractChannel:
 async def route_message(payload: dict) -> None:
     message = payload.get("message") or payload.get("channel_post", {})
     if not message:
-        logger.warning("route_message: payload contains no 'message' or 'channel_post' key — skipping. payload=%s", payload)
+        logger.warning("route_message: el payload no contiene clave 'message' ni 'channel_post' - omitiendo. payload=%s", payload)
         messages_rejected.inc()
         return
 
@@ -74,7 +73,7 @@ async def route_message(payload: dict) -> None:
 
     if "photo" in message:
         from shared.schemas import ImageTask
-        file_id = message["photo"][-1]["file_id"]   # highest resolution
+        file_id = message["photo"][-1]["file_id"]   # resolución máxima
         task = ImageTask(
             query_id=query_id,
             user_hash=user_hash,
@@ -92,7 +91,7 @@ async def route_message(payload: dict) -> None:
         min_length = int(os.getenv("NLP_MIN_TEXT_LENGTH", 50))
         if len(text) < min_length:
             logger.info(
-                "route_message: text too short (%d chars, min=%d) — dropped. chat_id=%s",
+                "route_message: texto demasiado corto (%d chars, mín=%d) - descartado. chat_id=%s",
                 len(text), min_length, chat_id,
             )
             messages_rejected.inc()
@@ -103,7 +102,6 @@ async def route_message(payload: dict) -> None:
                     f"{min_length} caracteres con una afirmación o noticia completa.",
                 )
             return
-        # Send interim acknowledgment (fire-and-forget) for non-command texts
         if not text.startswith("/"):
             asyncio.create_task(
                 _send_interim_message(
@@ -122,22 +120,22 @@ async def route_message(payload: dict) -> None:
         queue = os.getenv("RABBITMQ_QUEUE_TEXTS", "topic_texts")
         body = task.model_dump_json()
         logger.info(
-            "route_message: publishing TextTask query_id=%s chat_id=%s queue=%s text_preview=%.60r",
+            "route_message: publicando TextTask query_id=%s chat_id=%s queue=%s text_preview=%.60r",
             query_id, chat_id, queue, text,
         )
 
     else:
         logger.info(
-            "route_message: unsupported message type (no 'text' or 'photo') — skipping. keys=%s",
+            "route_message: tipo de mensaje no soportado (sin 'text' ni 'photo') - omitiendo. keys=%s",
             list(message.keys()),
         )
         messages_rejected.inc()
-        return  # Unsupported payload type (video, sticker, etc.)
+        return  # Tipo de payload no soportado (vídeo, sticker, etc.)
 
-    # Rate limit check — applied after payload validation, before publishing.
+    # Comprobación de rate limit - después de validar el payload, antes de publicar.
     if not await check_rate_limit(user_hash):
         logger.warning(
-            "route_message: rate limit exceeded — user_hash=%.12s… chat_id=%s",
+            "route_message: rate limit superado - user_hash=%.12s... chat_id=%s",
             user_hash, chat_id,
         )
         messages_rejected.inc()
@@ -157,16 +155,16 @@ async def route_message(payload: dict) -> None:
         texts_received.inc()
     else:
         images_received.inc()
-    logger.info("route_message: message published to queue=%s", queue)
+    logger.info("route_message: mensaje publicado en queue=%s", queue)
 
 
 async def publish_nlp_task(text: str) -> str:
-    """Publish a text task directly to the NLP queue and return the task_id."""
+    """Publica una tarea de texto directamente en la cola NLP y devuelve el task_id."""
     from shared.schemas import TextTask
 
     task = TextTask(
         user_hash="api_direct",
-        chat_id=0,  # no Telegram chat for direct API calls
+        chat_id=0,  # sin chat Telegram para llamadas directas a la API
         text=text,
         timestamp=datetime.now(timezone.utc),
     )

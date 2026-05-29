@@ -1,6 +1,6 @@
 """
-Shared Pydantic schemas for RabbitMQ message payloads and inter-service results.
-All services import from this module to guarantee a consistent contract.
+Esquemas Pydantic compartidos para payloads de mensajes RabbitMQ y resultados entre servicios.
+Todos los servicios importan desde este módulo para garantizar un contrato coherente.
 """
 from __future__ import annotations
 
@@ -11,11 +11,11 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-# ── Inbound tasks (Gateway → Workers) ────────────────────────────────────────
+# Tareas entrantes (Gateway -> Workers)
 
 class ImageTask(BaseModel):
     query_id: uuid.UUID = Field(default_factory=uuid.uuid4)
-    user_hash: str                      # SHA-256 of Telegram user_id (GDPR-safe)
+    user_hash: str                      # SHA-256 del user_id de Telegram (conforme RGPD)
     telegram_file_id: str
     chat_id: int
     timestamp: datetime.datetime
@@ -29,22 +29,22 @@ class TextTask(BaseModel):
     timestamp: datetime.datetime
 
 
-# ── Worker results ────────────────────────────────────────────────────────────
+# Resultados de los workers
 
 class VisionResult(BaseModel):
     query_id: uuid.UUID
-    ai_confidence_score: float          # 0.0 = real camera, 1.0 = synthetic AI
+    ai_confidence_score: float          # 0.0 = cámara real, 1.0 = sintético por IA
     prnu_detected: bool
     verdict: Literal["FAKE", "REAL", "UNVERIFIED"]
-    heatmap_path: str | None = None     # Local path to Grad-CAM overlay image
+    heatmap_path: str | None = None     # Ruta local a la imagen de sobreposición Grad-CAM
 
 
 class NLPResult(BaseModel):
-    """NLP worker result.
+    """Resultado del worker NLP.
 
-    retrieved_context: raw text of the source article retrieved from Qdrant/Google,
-                       used as input to the LLM.
-    summary:           final verdict synthesised by the LLM from retrieved_context.
+    retrieved_context: texto bruto del artículo fuente recuperado de Qdrant/Google,
+                       usado como entrada al LLM.
+    summary:           veredicto final sintetizado por el LLM a partir de retrieved_context.
     """
 
     query_id: uuid.UUID
@@ -52,11 +52,11 @@ class NLPResult(BaseModel):
     fact_check_matches: int
     source_url: str | None = None
     verdict: Literal["FAKE", "REAL", "UNVERIFIED"]
-    retrieved_context: str = ""         # source article text fed to the LLM
-    summary: str                        # LLM-generated 3-line verdict
+    retrieved_context: str = ""         # texto del artículo fuente enviado al LLM
+    summary: str                        # veredicto de 3 líneas generado por el LLM
 
 
-# ── MongoDB analytics document ────────────────────────────────────────────────
+# Documento analítico de MongoDB
 
 class QueryLog(BaseModel):
     query_id: str
@@ -66,12 +66,12 @@ class QueryLog(BaseModel):
     total_processing_time_ms: int
     final_verdict: Literal["FAKE", "REAL", "UNVERIFIED"]
     cache_hit: bool = False
-    # image-specific
+    # específico de imagen
     image_resolution: str | None = None
     ai_confidence_score: float | None = None
     prnu_detected: bool | None = None
-    # text-specific
+    # específico de texto
     extracted_entities: list[str] | None = None
     fact_check_matches: int | None = None
     source_url: str | None = None
-    feedback: str | None = None         # "correct" | "incorrect" — set via /feedback command
+    feedback: str | None = None         # "correct" | "incorrect" - enviado vía comando /feedback

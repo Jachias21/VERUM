@@ -1,5 +1,5 @@
 """
-Tests for services/worker_nlp/app/ner.py
+Tests para services/worker_nlp/app/ner.py
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ try:
 except ImportError:
     _SPACY_IMPORTABLE = False
 
-# Tier 2: the Spanish model is actually loadable (needed for real-SpaCy tests)
+# Nivel 2: el modelo en español es cargable (necesario para tests con SpaCy real)
 _SPACY_AVAILABLE = False
 if _SPACY_IMPORTABLE:
     try:
@@ -25,7 +25,7 @@ if _SPACY_IMPORTABLE:
     except Exception:
         pass
 
-# Tier 3: the English model is loadable (needed for the English NER test)
+# Nivel 3: el modelo en inglés es cargable (necesario para el test NER en inglés)
 _EN_SPACY_AVAILABLE = False
 if _SPACY_IMPORTABLE:
     try:
@@ -34,27 +34,26 @@ if _SPACY_IMPORTABLE:
     except Exception:
         pass
 
-# Mark: spacy package importable (module-level import of ner.py succeeds)
+# Mark: paquete spacy importable (la importación de ner.py tiene éxito)
 spacy_importable = pytest.mark.skipif(
     not _SPACY_IMPORTABLE,
-    reason="spacy package not installed",
+    reason="paquete spacy no instalado",
 )
 
-# Mark: es_core_news_lg model available (real SpaCy inference)
+# Mark: modelo es_core_news_lg disponible (inferencia SpaCy real)
 spacy_required = pytest.mark.skipif(
     not _SPACY_AVAILABLE,
-    reason="es_core_news_lg not installed",
+    reason="es_core_news_lg no instalado",
 )
 
-# Mark: en_core_web_sm model available
+# Mark: modelo en_core_web_sm disponible
 en_spacy_required = pytest.mark.skipif(
     not _EN_SPACY_AVAILABLE,
-    reason="en_core_web_sm not installed",
+    reason="en_core_web_sm no instalado",
 )
 
 
-# ── Test 1: extract_entities with known text ─────────────────────────────────
-
+# Test 1: extract_entities con texto conocido 
 @spacy_required
 def test_extract_entities_known_text():
     from services.worker_nlp.app.ner import extract_entities
@@ -63,15 +62,15 @@ def test_extract_entities_known_text():
     entities = extract_entities(text)
 
     assert isinstance(entities, list)
-    # At least both key entities must be present
+    # Al menos ambas entidades clave deben estar presentes
     joined = " ".join(entities).lower()
-    assert "madrid" in joined, f"Expected 'Madrid' in entities, got: {entities}"
+    assert "madrid" in joined, f"Se esperaba 'Madrid' en entidades, obtenido: {entities}"
     assert any("polic" in e.lower() for e in entities), (
-        f"Expected 'Policía Nacional' in entities, got: {entities}"
+        f"Se esperaba 'Policía Nacional' en entidades, obtenido: {entities}"
     )
 
 
-# ── Test 2: extract_entities with empty text ─────────────────────────────────
+#  Test 2: extract_entities con texto vacío 
 
 @spacy_required
 def test_extract_entities_empty_text():
@@ -80,8 +79,7 @@ def test_extract_entities_empty_text():
     assert extract_entities("") == []
 
 
-# ── Test 3: is_gibberish with random chars ───────────────────────────────────
-
+#  Test 3: is_gibberish con caracteres aleatorios  
 @spacy_required
 def test_is_gibberish_random_chars():
     from services.worker_nlp.app.ner import is_gibberish
@@ -89,7 +87,7 @@ def test_is_gibberish_random_chars():
     assert is_gibberish("asdf qwer zxcv 1234 !!") is True
 
 
-# ── Test 4: is_gibberish with normal Spanish text ────────────────────────────
+#  Test 4: is_gibberish con texto español normal 
 
 @spacy_required
 def test_is_gibberish_normal_text():
@@ -103,7 +101,7 @@ def test_is_gibberish_normal_text():
     assert is_gibberish(text) is False
 
 
-# ── Test 5: is_gibberish with very short text ────────────────────────────────
+#  Test 5: is_gibberish con texto muy corto 
 
 @spacy_required
 def test_is_gibberish_very_short_text():
@@ -112,7 +110,7 @@ def test_is_gibberish_very_short_text():
     assert is_gibberish("hi") is True
 
 
-# ── Test 6: is_gibberish with long random tokens (no vowels) ────────────────
+#  Test 6: is_gibberish con tokens largos aleatorios (sin vocales) 
 
 @spacy_required
 def test_is_gibberish_long_random_tokens():
@@ -123,14 +121,14 @@ def test_is_gibberish_long_random_tokens():
     ) is True
 
 
-# ── Test 7: extract_entities with English text → uses en_core_web_sm ─────────
+# ── Test 7: extract_entities con texto inglés → usa en_core_web_sm ──────────
 
 @spacy_required
 @en_spacy_required
 def test_extract_entities_english_uses_en_model():
     from services.worker_nlp.app.ner import extract_entities
 
-    # Force language detection to return "en" to ensure the English model is used
+    # Forzar que la detección de idioma devuelva "en" para asegurar que se usa el modelo inglés
     with patch("services.worker_nlp.app.ner._detect_language", return_value="en"):
         entities = extract_entities(
             "Apple and Microsoft are both headquartered in the United States of America"
@@ -140,11 +138,11 @@ def test_extract_entities_english_uses_en_model():
     assert len(entities) > 0
 
 
-# ── Test 7: extract_entities falls back to noun chunks when NER yields nothing ─
+# ── Test 7: extract_entities cae a noun chunks cuando NER no devuelve nada ───
 
 @spacy_importable
 def test_extract_entities_noun_chunks_fallback():
-    """When the SpaCy doc has no named entities, noun chunks must be used."""
+    """Cuando el doc SpaCy no tiene entidades nombradas, se deben usar noun chunks."""
     from services.worker_nlp.app.ner import extract_entities
 
     mock_chunk1 = MagicMock()
@@ -155,7 +153,7 @@ def test_extract_entities_noun_chunks_fallback():
     mock_chunk2.root.is_stop = False
 
     mock_doc = MagicMock()
-    mock_doc.ents = []  # No named entities
+    mock_doc.ents = []  # Sin entidades nombradas
     mock_doc.noun_chunks = [mock_chunk1, mock_chunk2]
 
     mock_nlp = MagicMock(return_value=mock_doc)
@@ -168,11 +166,11 @@ def test_extract_entities_noun_chunks_fallback():
     assert "las palabras raras" in entities
 
 
-# ── Test 8: extract_entities strips URLs and emojis before NLP processing ──────
+# ── Test 8: extract_entities limpia URLs y emojis antes del procesado NLP ────
 
 @spacy_importable
 def test_extract_entities_cleans_urls_and_emojis():
-    """URLs and emoji characters must be stripped from the text before SpaCy runs."""
+    """Las URLs y emojis deben eliminarse del texto antes de ejecutar SpaCy."""
     from services.worker_nlp.app.ner import extract_entities
 
     mock_doc = MagicMock()
@@ -185,7 +183,7 @@ def test_extract_entities_cleans_urls_and_emojis():
          patch("services.worker_nlp.app.ner._detect_language", return_value="es"):
         extract_entities("Mira este bulo 🎉 https://fake-news.com/article 💥 !!!")
 
-    # The text actually passed into the SpaCy pipeline must have no URL or emoji
+    # El texto pasado al pipeline SpaCy no debe tener URL ni emoji
     called_text = mock_nlp.call_args[0][0]
     assert "https" not in called_text
     assert "fake-news.com" not in called_text
@@ -193,11 +191,11 @@ def test_extract_entities_cleans_urls_and_emojis():
     assert "💥" not in called_text
 
 
-# ── Test 9: extract_entities returns a deduplicated list ──────────────────────
+# ── Test 9: extract_entities devuelve lista deduplicada ──────────────────────
 
 @spacy_importable
 def test_extract_entities_deduplicates():
-    """The same entity string appearing multiple times must appear only once."""
+    """La misma cadena de entidad que aparece varias veces debe aparecer solo una vez."""
     from services.worker_nlp.app.ner import extract_entities
 
     mock_ent1 = MagicMock()

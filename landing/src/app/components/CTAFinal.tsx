@@ -38,7 +38,7 @@ export default function CTAFinal() {
       }}
     >
       <div className="mx-auto flex max-w-3xl flex-col items-center px-6 text-center">
-        {/* Mascot */}
+        {/* Mascota */}
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           whileInView={{ opacity: 1, y: 0 }}
@@ -54,7 +54,7 @@ export default function CTAFinal() {
           />
         </motion.div>
 
-        {/* Heading */}
+        {/* Título */}
         <motion.h2
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
@@ -65,7 +65,7 @@ export default function CTAFinal() {
           {t.heading}
         </motion.h2>
 
-        {/* Paragraph */}
+        {/* Párrafo */}
         <motion.p
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
@@ -76,7 +76,7 @@ export default function CTAFinal() {
           {t.paragraph}
         </motion.p>
 
-        {/* CTA Button */}
+        {/* Botón CTA */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
@@ -98,7 +98,7 @@ export default function CTAFinal() {
           </a>
         </motion.div>
 
-        {/* Disclaimer */}
+        {/* Aviso legal */}
         <motion.p
           initial={{ opacity: 0 }}
           whileInView={{ opacity: 1 }}
@@ -110,7 +110,7 @@ export default function CTAFinal() {
         </motion.p>
       </div>
 
-      {/* Footer */}
+      {/* Pie de página */}
       <footer className="mx-auto mt-16 max-w-7xl border-t border-gray-light px-6 pt-8 text-center">
         <p className="text-sm text-text-secondary">
           © 2026 VERUM · TFM Máster IA &amp; Big Data

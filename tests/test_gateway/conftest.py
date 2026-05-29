@@ -1,18 +1,19 @@
 """
 conftest.py — test_gateway
 
-Registers services.gateway.app.* under the bare ``app.*`` namespace in
-sys.modules for the duration of each gateway test module.  This ensures
-that router.py's internal ``from app.metrics import ...`` / ``from app.rate_limiter
-import ...`` imports find the *gateway* module objects regardless of which
-other conftest files have already been evaluated during pytest collection.
+Registra services.gateway.app.* bajo el espacio de nombres ``app.*`` en
+sys.modules durante cada módulo de test de gateway. Esto garantiza que
+las importaciones internas de router.py (``from app.metrics import ...`` /
+``from app.rate_limiter import ...``) encuentren los objetos del módulo de
+gateway independientemente de qué otros conftest ya se hayan evaluado
+durante la colección de pytest.
 
-Background: pytest loads ALL conftest.py files before running any tests.
-test_integration/conftest.py used to register app.* → worker_nlp modules at
-module level (before any test ran), which meant gateway tests would fail with
+Contexto: pytest carga TODOS los conftest.py antes de ejecutar ningún test.
+test_integration/conftest.py registraba app.* → módulos worker_nlp a nivel de
+módulo (antes de cualquier test), lo que causaba fallos en los tests de gateway:
   ImportError: cannot import name 'texts_received' from 'services.worker_nlp.app.metrics'
-The autouse fixture approach defers registration until each test module
-actually starts, and restores sys.modules on teardown.
+El enfoque con fixture autouse aplaza el registro hasta que cada módulo de test
+comienza realmente, y restaura sys.modules al terminar.
 """
 from __future__ import annotations
 
@@ -24,7 +25,7 @@ import pytest
 
 @pytest.fixture(autouse=True, scope="module")
 def _gateway_app_modules():
-    """Register services.gateway.app.* as app.* for the duration of this module."""
+    """Registra services.gateway.app.* como app.* durante la duración de este módulo."""
     _NAMES = ("metrics", "rate_limiter")
     saved: dict[str, object] = {}
 

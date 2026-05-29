@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-eval_nlp.py — Evaluación cuantitativa del módulo NLP de VERUM contra un gold set.
+eval_nlp.py - Evaluación cuantitativa del módulo NLP de VERUM contra un gold set.
 
 Ejecuta el pipeline completo (NER → hybrid_search → synthesize_verdict →
 _extract_verdict_from_llm_output) para cada ejemplo del gold set y genera:
 
-  reports/eval_summary.json  — métricas en formato máquina-legible
-  reports/eval_report.html   — informe HTML con tabla, matriz de confusión y fallos
+  reports/eval_summary.json  - métricas en formato máquina-legible
+  reports/eval_report.html   - informe HTML con tabla, matriz de confusión y fallos
 
 USO:
   python scripts/eval_nlp.py --gold tests/golden/gold_nlp.jsonl --out reports/
@@ -31,7 +31,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-# ── Ensure project root is in sys.path ────────────────────────────────────────
+# Ensure project root is in sys.path
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
@@ -46,11 +46,11 @@ for _name in ("cache", "metrics", "ner", "rag"):
 
 logging.basicConfig(
     level=logging.WARNING,
-    format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
 )
 logger = logging.getLogger("verum.eval_nlp")
 
-# ── Pipeline imports (after path setup) ───────────────────────────────────────
+# Pipeline imports (after path setup)
 from services.worker_nlp.app.ner import extract_entities, is_gibberish  # noqa: E402
 from services.worker_nlp.app.rag import (  # noqa: E402
     hybrid_search,
@@ -62,10 +62,7 @@ from services.worker_nlp.app.rag import (  # noqa: E402
 LABELS = ["FAKE", "REAL", "UNVERIFIED"]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Pipeline runner
-# ─────────────────────────────────────────────────────────────────────────────
-
 async def _run_one(example: dict[str, Any]) -> dict[str, Any]:
     """Run the full NLP pipeline on a single gold example. Never raises."""
     text: str = example["text"]
@@ -97,7 +94,7 @@ async def _run_one(example: dict[str, Any]) -> dict[str, Any]:
 
         rag_result = await synthesize_verdict(rag_result, text)
 
-        # Shared decision logic — identical to worker.py (production parity)
+        # Shared decision logic - identical to worker.py (production parity)
         rag_result = resolve_final_verdict(rag_result)
         predicted = rag_result.verdict
 
@@ -142,10 +139,7 @@ async def _run_all(gold: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return results
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Metrics
-# ─────────────────────────────────────────────────────────────────────────────
-
 def _compute_metrics(results: list[dict[str, Any]]) -> dict[str, Any]:
     """Compute precision/recall/F1, confusion matrix and latency percentiles."""
     try:
@@ -229,10 +223,7 @@ def _compute_metrics(results: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Confusion matrix image (base64 PNG)
-# ─────────────────────────────────────────────────────────────────────────────
-
 def _cm_png_b64(cm: list[list[int]]) -> str:
     """Render confusion matrix as a base64-encoded PNG string."""
     try:
@@ -250,7 +241,7 @@ def _cm_png_b64(cm: list[list[int]]) -> str:
         display_labels=LABELS,
     )
     disp.plot(ax=ax, colorbar=True, cmap="Blues")
-    ax.set_title("Matriz de confusión — VERUM NLP")
+    ax.set_title("Matriz de confusión - VERUM NLP")
     plt.tight_layout()
 
     buf = io.BytesIO()
@@ -260,15 +251,12 @@ def _cm_png_b64(cm: list[list[int]]) -> str:
     return base64.b64encode(buf.read()).decode("ascii")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # HTML report
-# ─────────────────────────────────────────────────────────────────────────────
-
 def _render_html(metrics: dict[str, Any], cm_b64: str) -> str:
     cm_img_tag = (
         f'<img src="data:image/png;base64,{cm_b64}" alt="Confusion matrix" style="max-width:480px;">'
         if cm_b64
-        else "<p><em>matplotlib no disponible — imagen omitida.</em></p>"
+        else "<p><em>matplotlib no disponible - imagen omitida.</em></p>"
     )
 
     # Build per-class table rows
@@ -292,7 +280,7 @@ def _render_html(metrics: dict[str, Any], cm_b64: str) -> str:
     failures = [r for r in metrics["detail"] if r["predicted"] != r["expected"]]
     fail_rows = ""
     for r in failures:
-        truncated = (r.get("id", "") + " — see gold set")
+        truncated = (r.get("id", "") + " - see gold set")
         err = r.get("error") or ""
         fail_rows += (
             f"<tr>"
@@ -314,7 +302,7 @@ def _render_html(metrics: dict[str, Any], cm_b64: str) -> str:
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>VERUM NLP — Informe de Evaluación</title>
+<title>VERUM NLP - Informe de Evaluación</title>
 <style>
   body {{ font-family: Arial, sans-serif; max-width: 960px; margin: 2em auto; color: #222; }}
   h1 {{ color: #1a3c6e; }}
@@ -330,7 +318,7 @@ def _render_html(metrics: dict[str, Any], cm_b64: str) -> str:
 </style>
 </head>
 <body>
-<h1>VERUM NLP — Informe de Evaluación</h1>
+<h1>VERUM NLP - Informe de Evaluación</h1>
 
 <div class="section">
 <h2>Resumen</h2>
@@ -395,10 +383,7 @@ def _render_html(metrics: dict[str, Any], cm_b64: str) -> str:
     return html
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Main
-# ─────────────────────────────────────────────────────────────────────────────
-
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Evaluación cuantitativa del módulo NLP de VERUM contra un gold set."
@@ -443,7 +428,7 @@ async def _main() -> None:
     if args.limit:
         gold = gold[: args.limit]
 
-    print(f"\nVERUM NLP — Evaluación contra gold set")
+    print(f"\nVERUM NLP - Evaluación contra gold set")
     print(f"  Gold set : {gold_path} ({len(gold)} ejemplos)")
     print(f"  Salida   : {out_dir}")
     print()

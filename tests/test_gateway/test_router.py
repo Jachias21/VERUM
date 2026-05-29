@@ -1,5 +1,5 @@
 """
-Tests for services/gateway/app/router.py
+Tests para services/gateway/app/router.py
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from shared.schemas import ImageTask, TextTask
 
 
 def _telegram_payload(text: str | None = None, photo: bool = False, chat_id: int = 111) -> dict:
-    """Build a minimal Telegram update dict."""
+    """Construye un dict mínimo de update de Telegram."""
     message: dict = {
         "from": {"id": 42},
         "chat": {"id": chat_id},
@@ -37,12 +37,12 @@ def _make_mock_channel() -> MagicMock:
     return channel
 
 
-# ── Test 14: short text is dropped, nothing published ────────────────────────
+# ── Test 14: texto corto descartado, nada publicado ─────────────────────────
 
 async def test_route_message_short_text_not_published():
     from services.gateway.app.router import route_message
 
-    short_text = "Hola"  # definitely < 50 chars
+    short_text = "Hola"  # definitivamente < 50 chars
     payload = _telegram_payload(text=short_text)
 
     mock_channel = _make_mock_channel()
@@ -56,7 +56,7 @@ async def test_route_message_short_text_not_published():
     mock_channel.default_exchange.publish.assert_not_called()
 
 
-# ── Test 15: long text publishes a valid TextTask ────────────────────────────
+# ── Test 15: texto largo publica un TextTask válido ─────────────────────────
 
 async def test_route_message_long_text_published():
     from services.gateway.app.router import route_message
@@ -76,16 +76,16 @@ async def test_route_message_long_text_published():
 
     mock_channel.default_exchange.publish.assert_called_once()
     call_args = mock_channel.default_exchange.publish.call_args
-    published_message = call_args[0][0]  # first positional arg to publish()
+    published_message = call_args[0][0]  # primer argumento posicional de publish()
     body = json.loads(published_message.body.decode())
 
-    # Must deserialize cleanly as a TextTask
+    # Debe deserializarse correctamente como TextTask
     task = TextTask.model_validate(body)
     assert task.text == long_text
     assert task.chat_id == 999
 
 
-# ── Test 16: photo payload publishes a valid ImageTask ───────────────────────
+# ── Test 16: payload de foto publica un ImageTask válido ────────────────────
 
 async def test_route_message_photo_published():
     from services.gateway.app.router import route_message
@@ -106,25 +106,25 @@ async def test_route_message_photo_published():
     body = json.loads(published_message.body.decode())
 
     task = ImageTask.model_validate(body)
-    assert task.telegram_file_id == "large_id"  # highest-resolution photo
+    assert task.telegram_file_id == "large_id"  # foto de mayor resolución
 
 
-# ── Test 17: unsupported payload type — nothing published, no exception ───────
+# ── Test 17: tipo de payload no soportado — nada publicado, sin excepción ───
 
 async def test_route_message_unsupported_type_no_exception():
     from services.gateway.app.router import route_message
 
-    # Sticker message — neither text nor photo
+    # Mensaje con sticker — ni texto ni foto
     payload = {"message": {"from": {"id": 1}, "chat": {"id": 2}, "sticker": {"file_id": "stk_1"}}}
     mock_channel = _make_mock_channel()
 
     with patch("services.gateway.app.router._get_channel", new=AsyncMock(return_value=mock_channel)):
-        await route_message(payload)  # must not raise
+        await route_message(payload)  # no debe lanzar excepción
 
     mock_channel.default_exchange.publish.assert_not_called()
 
 
-# ── Test 18: rate limit blocks the 11th request ────────────────────────────────
+# ── Test 18: rate limit bloquea la undecima petición ─────────────────────────
 
 async def test_rate_limit_blocks_after_max():
     from services.gateway.app.router import route_message
@@ -142,12 +142,12 @@ async def test_rate_limit_blocks_after_max():
     ):
         await route_message(payload)
 
-    # Rate-limited: nothing published to the queue
+    # Rate-limited: nada publicado en la cola
     mock_channel.default_exchange.publish.assert_not_called()
-    # User receives the courtesy rate-limit message.
-    # NOTE: route_message also schedules an analysis interim via asyncio.create_task
-    # before reaching the rate-limit check, so the mock may be called 1 or 2 times.
-    assert mock_interim.called, "_send_interim_message was never called"
+    # El usuario recibe el mensaje de rate-limit.
+    # NOTA: route_message también agenda un interim de análisis vía asyncio.create_task
+    # antes de llegar al check de rate-limit, por lo que el mock puede llamarse 1 o 2 veces.
+    assert mock_interim.called, "_send_interim_message no fue llamado"
     all_texts = [c[0][1] for c in mock_interim.call_args_list]
     assert any("⏳" in t or "demasiados" in t for t in all_texts), (
         f"Expected rate-limit message in calls, got: {all_texts}"

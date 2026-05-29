@@ -1,13 +1,13 @@
 """
-Embedding model utilities shared between the ETL pipeline and worker_nlp.
+Utilidades de modelo de embeddings compartidas entre el pipeline ETL y worker_nlp.
 
-Dense model : intfloat/multilingual-e5-large (multilingual, 1024-dim, ONNX via fastembed).
-Sparse model: Qdrant/bm25 via fastembed (BM25 sparse vectors).
+Modelo denso  : intfloat/multilingual-e5-large (multilingual, 1024-dim, ONNX vía fastembed).
+Modelo sparse : Qdrant/bm25 vía fastembed (vectores sparse BM25).
 """
 from __future__ import annotations
 
-_dense_model = None   # fastembed.TextEmbedding — lazy
-_sparse_model = None  # fastembed.SparseTextEmbedding — lazy
+_dense_model = None   # fastembed.TextEmbedding - lazy
+_sparse_model = None  # fastembed.SparseTextEmbedding - lazy
 
 DENSE_MODEL_NAME = "intfloat/multilingual-e5-large"
 
@@ -21,7 +21,7 @@ def get_model():
 
 
 def embed(texts: list[str]) -> list[list[float]]:
-    """Return dense embeddings. Prefixes 'query: ' for single items (RAG queries)."""
+    """Devuelve embeddings densos. Añade el prefijo 'query: ' para elementos individuales (consultas RAG)."""
     model = get_model()
     return [v.tolist() for v in model.embed(texts)]
 
@@ -35,5 +35,5 @@ def get_sparse_model():
 
 
 def sparse_embed(texts: list[str]):
-    """Return a list of fastembed SparseEmbedding objects (have .indices, .values)."""
+    """Devuelve una lista de objetos SparseEmbedding de fastembed (con .indices y .values)."""
     return list(get_sparse_model().embed(texts))

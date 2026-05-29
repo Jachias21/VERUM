@@ -1,6 +1,6 @@
 """
-NLP Worker — consumes TextTask messages from RabbitMQ,
-runs the RAG fact-checking pipeline, and delivers the verdict via Telegram.
+Worker NLP - consume mensajes TextTask de RabbitMQ,
+ejecutar el pipeline RAG de verificación de hechos y envía el veredicto por Telegram.
 """
 import asyncio
 import datetime
@@ -30,7 +30,7 @@ load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[logging.StreamHandler()],
     force=True,
@@ -38,55 +38,44 @@ logging.basicConfig(
 
 
 def _sanitize_summary(summary: str) -> str:
-    """Strip the VEREDICTO: prefix from LLM output while preserving the explanation.
-
-    The LLM often responds in a single line:
-        "VEREDICTO: FALSO — Según el artículo, Mercadona desmintió..."
-    or without the prefix:
-        "FALSO — Según el artículo..."
-
-    We strip only the verdict keyword and keep the explanation that follows the
-    separator (' — ', ' - ', ' – ').  If there is no separator we strip the
-    whole VEREDICTO: line only when it stands alone (no explanation text).
-    We also strip spurious 'Fuente:' / URL lines injected by fallback paths or
-    hallucinated by the LLM.
+    """Elimina el prefijo VEREDICTO: de la salida del LLM conservando la explicación.
+    También limpia líneas 'Fuente:' / URLs inyectadas por rutas de fallback o alucinadas.
     """
-    # 1. Strip "VEREDICTO: FALSO — " / "VEREDICTO: VERDADERO — " / "VEREDICTO: NO VERIFICADO — "
-    #    keeping everything after the separator.
+    # 1. Elimina "VEREDICTO: FALSO — " / "VEREDICTO: VERDADERO — " / "VEREDICTO: NO VERIFICADO — "
     cleaned = re.sub(
         r"(?im)^[\s*]*veredicto?:\s*(?:falso|verdadero|no[\s_-]verificado)\s*[-–—]+\s*",
         "",
         summary,
     )
-    # 2. Strip a bare "VEREDICTO: XXXX" line that has NO explanation after it.
+    # 2. Elimina una línea "VEREDICTO: XXXX" sin explicación.
     cleaned = re.sub(
         r"(?im)^[\s*]*veredicto?:\s*(?:falso|verdadero|no[\s_-]verificado)\s*$",
         "",
         cleaned,
     )
-    # 3. Strip bare verdict keywords at the very start of the text (LLM echo without prefix).
+    # 3. Elimina keywords de veredicto al inicio del texto (eco del LLM sin prefijo).
     cleaned = re.sub(
         r"(?im)^(falso|verdadero|no[\s_-]verificado)\s*[-–—]+\s*",
         "",
         cleaned,
     )
-    # 4. Strip 'Fuente:' lines (spurious from fallback paths or hallucinated by LLM).
+    # 4. Elimina líneas 'Fuente:' espurias.
     cleaned = re.sub(r"(?im)^[\s*]*fuente:\s*.+$", "", cleaned)
-    # 5. Strip bare URLs the LLM may hallucinate.
+    # 5. Elimina URLs sueltas alucinadas por el LLM.
     cleaned = re.sub(r"(?im)^https?://\S+\s*$", "", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
 
 
 def _escape_html(text: str) -> str:
-    """Escape the three characters reserved by Telegram's HTML parser."""
+    """Escapa los tres caracteres reservados por el parser HTML de Telegram."""
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 async def _send_telegram_reply(chat_id: int, text: str) -> None:
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
-        logger.error("_send_telegram_reply: TELEGRAM_BOT_TOKEN is not set — skipping reply to chat_id=%s", chat_id)
+        logger.error("_send_telegram_reply: TELEGRAM_BOT_TOKEN no configurado - omitiendo respuesta a chat_id=%s", chat_id)
         return
     bot = Bot(token=token)
     try:
@@ -100,7 +89,7 @@ async def _send_telegram_reply(chat_id: int, text: str) -> None:
         err_str = str(e).lower()
         if "parse" in err_str or "entity" in err_str or "can't find end" in err_str:
             logger.warning(
-                "_send_telegram_reply: HTML parse error for chat_id=%s (%s) — retrying as plain text",
+                "_send_telegram_reply: error de parseo HTML para chat_id=%s (%s) - reintentando como texto plano",
                 chat_id, e,
             )
             try:
@@ -112,17 +101,17 @@ async def _send_telegram_reply(chat_id: int, text: str) -> None:
                 )
             except Exception as inner_e:
                 logger.error(
-                    "_send_telegram_reply: plain-text fallback also failed for chat_id=%s — %s: %s",
+                    "_send_telegram_reply: fallback a texto plano también falló para chat_id=%s - %s: %s",
                     chat_id, type(inner_e).__name__, inner_e,
                 )
         else:
             logger.error(
-                "_send_telegram_reply: failed to send message to chat_id=%s — %s: %s",
+                "_send_telegram_reply: error enviando mensaje a chat_id=%s - %s: %s",
                 chat_id, type(e).__name__, e,
             )
     except Exception as e:
         logger.error(
-            "_send_telegram_reply: failed to send message to chat_id=%s — %s: %s",
+            "_send_telegram_reply: error enviando mensaje a chat_id=%s - %s: %s",
             chat_id, type(e).__name__, e,
         )
 
@@ -151,7 +140,7 @@ async def process(message: aio_pika.abc.AbstractIncomingMessage) -> None:
             cache_hit = cached is not None
             if cache_hit:
                 result = cached
-                logger.info("[nlp] Cache HIT for query_id=%s", task.query_id)
+                logger.info("[nlp] Cache HIT para query_id=%s", task.query_id)
                 elapsed_ms = int((time.monotonic() - start) * 1000)
             else:
                 entities = extract_entities(task.text)
@@ -165,17 +154,15 @@ async def process(message: aio_pika.abc.AbstractIncomingMessage) -> None:
                 result = resolve_final_verdict(result)
                 if result.verdict != _prev_verdict:
                     logger.info(
-                        "process: verdict resolved %r → %r for query_id=%s",
+                        "process: veredicto resuelto %r → %r para query_id=%s",
                         _prev_verdict, result.verdict, task.query_id,
                     )
 
                 elapsed_ms = int((time.monotonic() - start) * 1000)
                 await set_cached_verdict(text_hash, result)
 
-            # ── Prometheus: observe end-to-end NLP latency ─────────────────────
             nlp_processing_seconds.observe(elapsed_ms / 1000)
 
-            # ── GAP 1: Log to MongoDB ─────────────────────────────────────────────
             db = get_mongo_db()
             log = QueryLog(
                 query_id=str(task.query_id),
@@ -193,11 +180,11 @@ async def process(message: aio_pika.abc.AbstractIncomingMessage) -> None:
                 await db["queries"].insert_one(log.model_dump())
             except Exception as mongo_err:
                 logger.error(
-                    "[nlp worker] MongoDB insert failed for query_id=%s: %s",
+                    "[nlp worker] Error insertando en MongoDB para query_id=%s: %s",
                     task.query_id, mongo_err,
                 )
 
-            # ── GAP 2: Send Telegram reply ────────────────────────────────────────
+
             if task.chat_id:
                 _no_info_override = not cache_hit and _is_no_info_response(result.summary)
                 if _no_info_override:
@@ -225,11 +212,11 @@ async def process(message: aio_pika.abc.AbstractIncomingMessage) -> None:
                 await _send_telegram_reply(task.chat_id, reply)
 
             print(f"[nlp] {task.query_id} → {result.verdict} ({elapsed_ms}ms)")
-            print(f"[nlp] LLM verdict:\n{result.summary}")
+            print(f"[nlp] Veredicto LLM:\n{result.summary}")
 
         except asyncio.TimeoutError:
             query_id = getattr(task, "query_id", "unknown")
-            logger.error("[nlp worker] RAG pipeline timeout for query_id=%s", query_id)
+            logger.error("[nlp worker] Timeout del pipeline RAG para query_id=%s", query_id)
             if task is not None and task.chat_id:
                 try:
                     await _send_telegram_reply(
@@ -242,7 +229,7 @@ async def process(message: aio_pika.abc.AbstractIncomingMessage) -> None:
         except Exception as e:
             query_id = getattr(task, "query_id", "unknown")
             logger.error(
-                "[nlp worker] process() failed for query_id=%s: %s",
+                "[nlp worker] process() falló para query_id=%s: %s",
                 query_id, e, exc_info=True,
             )
             if task is not None and task.chat_id:
@@ -260,8 +247,8 @@ async def main() -> None:
     max_retries = int(os.getenv("RABBITMQ_CONNECT_MAX_RETRIES", "10"))
     metrics_port = int(os.getenv("NLP_METRICS_PORT", "9101"))
     start_http_server(metrics_port)
-    logger.info("[nlp worker] Prometheus metrics available on :%d/metrics", metrics_port)
-    logger.info("[nlp worker] Connecting to %s", mask_amqp_url(url))
+    logger.info("[nlp worker] Métricas Prometheus disponibles en :%d/metrics", metrics_port)
+    logger.info("[nlp worker] Conectando a %s", mask_amqp_url(url))
     attempt = 0
     while True:
         try:
@@ -272,37 +259,34 @@ async def main() -> None:
                 os.getenv("RABBITMQ_QUEUE_TEXTS", "topic_texts"), durable=True
             )
             await queue.consume(process)
-            attempt = 0  # reset on successful connection
-            print("[nlp worker] Waiting for messages…")
+            attempt = 0  # reiniciar en conexión exitosa
+            print("[nlp worker] Esperando mensajes...")
             await asyncio.Future()
         except Exception as e:
             attempt += 1
             if attempt > max_retries:
                 logger.error(
-                    "[nlp worker] RabbitMQ unreachable after %d retries — giving up",
+                    "[nlp worker] RabbitMQ inaccesible tras %d reintentos - abortando",
                     max_retries,
                 )
                 raise
             delay = min(2 ** attempt, 30)
             logger.error(
-                "[nlp worker] RabbitMQ connection lost: %s — reconnecting in %ds (attempt %d/%d)",
+                "[nlp worker] Conexión RabbitMQ perdida: %s - reconectando en %ds (intento %d/%d)",
                 e, delay, attempt, max_retries,
             )
             await asyncio.sleep(delay)
 
 
 async def _run_smoke_test() -> None:
-    """Push one synthetic TextTask through process() without starting the metrics server.
-
-    Designed to be invoked via ``python -m app.worker --test`` inside a running
-    container so that ``make nlp-test`` can validate the pipeline without
-    conflicting with the already-bound Prometheus port.
+    """Envía un TextTask sintético a process() sin arrancar el servidor de métricas.
+    Diseñado para invocarse con ``python -m app.worker --test`` dentro del contenedor.
     """
     import datetime
     import uuid
 
     class _FakeMsg:
-        """Minimal aio_pika message stub — mirrors FakeMessage in the test suite."""
+        """Stub mínimo de mensaje aio_pika para las pruebas."""
 
         def __init__(self, task: TextTask) -> None:
             self.body = task.model_dump_json().encode()
@@ -320,7 +304,7 @@ async def _run_smoke_test() -> None:
     task = TextTask(
         query_id=uuid.uuid4(),
         user_hash="a" * 64,
-        chat_id=0,  # 0 is falsy → process() skips Telegram reply
+        chat_id=0,  # 0 es falsy → process() omite la respuesta de Telegram
         text=(
             "El Gobierno de España ha confirmado que el nuevo virus detectado "
             "en Madrid no representa ningún peligro real para la población "
@@ -328,20 +312,20 @@ async def _run_smoke_test() -> None:
         ),
         timestamp=datetime.datetime.now(datetime.timezone.utc),
     )
-    logger.info("[nlp-test] Smoke test started — query_id=%s", task.query_id)
+    logger.info("[nlp-test] Smoke test iniciado - query_id=%s", task.query_id)
     await process(_FakeMsg(task))
-    logger.info("[nlp-test] Smoke test completed successfully.")
+    logger.info("[nlp-test] Smoke test completado correctamente.")
 
 
 if __name__ == "__main__":
     import argparse
 
-    _parser = argparse.ArgumentParser(description="NLP Worker")
+    _parser = argparse.ArgumentParser(description="Worker NLP")
     _parser.add_argument(
         "--test",
         action="store_true",
-        help="Run a single smoke-test message through the pipeline and exit "
-             "(skips Prometheus server startup to avoid port conflicts).",
+        help="Ejecuta un mensaje de smoke-test a través del pipeline y termina "
+             "(omite el servidor Prometheus para evitar conflictos de puerto).",
     )
     _args = _parser.parse_args()
 

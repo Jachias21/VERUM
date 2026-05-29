@@ -77,7 +77,7 @@ const stepsData = [
   },
 ];
 
-/* ─── Tag pill — shared between mobile and desktop ───────────────── */
+/* ─── Tag pill — compartido entre móvil y escritorio ───────────────── */
 function TagPill({ label }: { label: string }) {
   return (
     <span
@@ -195,8 +195,8 @@ export default function HowItWorks() {
         </div>
 
         {/* ══════════════════════════════════════════════
-            MOBILE layout  (< 768 px)
-            — Shown by default, hidden on md+
+            Vista MÓVIL  (< 768 px)
+            — Visible por defecto, oculta en md+
         ══════════════════════════════════════════════ */}
         <div className="md:hidden">
           <div
@@ -222,8 +222,8 @@ export default function HowItWorks() {
                   boxSizing: "border-box",
                 }}
               >
-                {/* Mascot — fixed px dimensions, no fill, avoids Safari
-                    positioning bugs with position:relative + fill */}
+                {/* Mascota — dimensiones px fijas, sin fill, evita bugs de posicionamiento
+                    en Safari con position:relative + fill */}
                 <div
                   style={{
                     width: "180px",
@@ -243,7 +243,7 @@ export default function HowItWorks() {
                   />
                 </div>
 
-                {/* Context mini-card */}
+                {/* Mini-tarjeta de contexto */}
                 <div
                   style={{
                     width: "100%",
@@ -284,7 +284,7 @@ export default function HowItWorks() {
                   </div>
                 </div>
 
-                {/* Step number (decorative) */}
+                {/* Número de paso (decorativo) */}
                 <div
                   style={{
                     fontFamily: "var(--font-poppins)",
@@ -300,7 +300,7 @@ export default function HowItWorks() {
                   {step.number}
                 </div>
 
-                {/* Title */}
+                {/* Título */}
                 <h3
                   style={{
                     fontFamily: "var(--font-poppins)",
@@ -316,7 +316,7 @@ export default function HowItWorks() {
                   {isEs ? step.titleEs : step.titleEn}
                 </h3>
 
-                {/* Description */}
+                {/* Descripción */}
                 <p
                   style={{
                     fontFamily: "var(--font-nunito)",
@@ -337,11 +337,11 @@ export default function HowItWorks() {
         </div>
 
         {/* ══════════════════════════════════════════════
-            DESKTOP layout  (≥ 768 px)
-            — Hidden on mobile, shown on md+
+            Vista ESCRITORIO  (≥ 768 px)
+            — Oculta en móvil, visible en md+
         ══════════════════════════════════════════════ */}
         <div className="hidden md:grid grid-cols-2 gap-16 items-start">
-          {/* Left column — Steps */}
+          {/* Columna izquierda — Pasos */}
           <div>
             {stepsData.map((step, index) => {
               const isActive = activeStep === index;
@@ -358,7 +358,7 @@ export default function HowItWorks() {
                     boxSizing: "border-box",
                   }}
                 >
-                  {/* Active indicator bar */}
+                  {/* Barra indicadora activa */}
                   <div
                     style={{
                       position: "absolute",
@@ -372,7 +372,7 @@ export default function HowItWorks() {
                     }}
                   />
 
-                  {/* Decorative number */}
+                  {/* Número decorativo */}
                   <div
                     style={{
                       fontFamily: "var(--font-poppins)",
@@ -388,7 +388,7 @@ export default function HowItWorks() {
                     {step.number}
                   </div>
 
-                  {/* Title */}
+                  {/* Título */}
                   <h3
                     style={{
                       fontFamily: "var(--font-poppins)",
@@ -403,7 +403,7 @@ export default function HowItWorks() {
                     {isEs ? step.titleEs : step.titleEn}
                   </h3>
 
-                  {/* Description */}
+                  {/* Descripción */}
                   <p
                     style={{
                       fontFamily: "var(--font-nunito)",
@@ -422,10 +422,10 @@ export default function HowItWorks() {
             })}
           </div>
 
-          {/* Right column — Sticky mascot + context card */}
+          {/* Columna derecha — Mascota fija + tarjeta de contexto */}
           <div className="hidden md:block sticky top-[120px] h-fit">
             <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-            {/* Mascot with AnimatePresence */}
+            {/* Mascota con AnimatePresence */}
             <div
               style={{
                 position: "relative",
@@ -456,7 +456,7 @@ export default function HowItWorks() {
               </AnimatePresence>
             </div>
 
-            {/* Context mini-card with AnimatePresence */}
+            {/* Mini-tarjeta de contexto con AnimatePresence */}
             <AnimatePresence mode="wait">
               <motion.div
                 key={activeStep}
@@ -492,9 +492,9 @@ export default function HowItWorks() {
                 </div>
               </motion.div>
             </AnimatePresence>
-            </div>{/* end inner flex wrapper */}
-          </div>{/* end sticky column */}
-        </div>{/* end desktop grid */}
+            </div>{/* fin del wrapper flex interno */}
+          </div>{/* fin de la columna pegajosa */}
+        </div>{/* fin del grid de escritorio */}
 
       </div>
     </section>

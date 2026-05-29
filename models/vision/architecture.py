@@ -1,12 +1,9 @@
 """
-Two-Stream CNN architecture for AI-generated image detection.
+Arquitectura CNN de dos flujos para detección de imágenes generadas por IA.
 
-Spatial branch  → processes original RGB image.
-Frequency branch → processes high-pass DFT spectrum of Cb/Cr channels.
-Both branches are fused via concatenation before the classification head.
-
-Reference: "Dual-Stream Network for Visual Recognition" pattern applied to
-forensic frequency analysis (PRNU / upsampling artefact detection).
+Rama espacial   → procesa la imagen RGB original.
+Rama frecuencial → procesa el espectro DFT high-pass de los canales Cb/Cr.
+Ambas ramas se fusionan por concatenación antes de la cabeza de clasificación.
 """
 import torch
 import torch.nn as nn
@@ -14,7 +11,7 @@ import torchvision.models as models
 
 
 class FrequencyBranch(nn.Module):
-    """Lightweight CNN for the 2-channel (Cb, Cr) frequency spectrum tensor."""
+    """CNN ligero para el tensor de espectro frecuencial de 2 canales (Cb, Cr)."""
 
     def __init__(self, out_features: int = 512):
         super().__init__()
@@ -35,20 +32,20 @@ class FrequencyBranch(nn.Module):
 
 class TwoStreamCNN(nn.Module):
     """
-    Dual-branch classifier.
-      spatial_branch : EfficientNet-B0 backbone (pretrained ImageNet).
-      freq_branch    : custom FrequencyBranch.
-      head           : MLP → sigmoid → P(synthetic).
+    Clasificador de dos ramas.
+      spatial_branch : backbone EfficientNet-B0 (preentrenado en ImageNet).
+      freq_branch    : FrequencyBranch personalizado.
+      head           : MLP → sigmoid → P(sintético).
     """
 
     def __init__(self, pretrained: bool = True):
         super().__init__()
-        # Spatial branch — replace final classifier
+        # Rama espacial - sustituir el clasificador final
         efficientnet = models.efficientnet_b0(
             weights=models.EfficientNet_B0_Weights.DEFAULT if pretrained else None
         )
         self.spatial_branch = nn.Sequential(*list(efficientnet.children())[:-1])
-        spatial_out = 1280  # EfficientNet-B0 feature size
+        spatial_out = 1280  # tamaño de características de EfficientNet-B0
 
         self.freq_branch = FrequencyBranch(out_features=512)
 

@@ -1,5 +1,5 @@
 """
-Tests for shared/schemas.py — NLPResult field contract.
+Tests para shared/schemas.py — contrato de campos de NLPResult.
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ def _make_nlp_result(**kwargs) -> NLPResult:
     return NLPResult(**defaults)
 
 
-# ── Test 1: retrieved_context field exists with default "" ───────────────────
+#  Test 1: campo retrieved_context existe con valor por defecto "" 
 
 def test_nlp_result_retrieved_context_default():
     result = _make_nlp_result()
@@ -29,7 +29,7 @@ def test_nlp_result_retrieved_context_default():
     assert result.retrieved_context == ""
 
 
-# ── Test 2: retrieved_context and summary are independent ────────────────────
+#  Test 2: retrieved_context y summary son independientes 
 
 def test_nlp_result_fields_are_independent():
     result = _make_nlp_result(
@@ -39,7 +39,7 @@ def test_nlp_result_fields_are_independent():
     assert result.retrieved_context == "Texto del artículo fuente."
     assert result.summary == "VEREDICTO: FALSO — esto es un bulo."
 
-    # Mutate one; the other must not change
+    # Mutar uno; el otro no debe cambiar
     result.summary = "Otro veredicto."
     assert result.retrieved_context == "Texto del artículo fuente."
 
@@ -47,7 +47,7 @@ def test_nlp_result_fields_are_independent():
     assert result.summary == "Otro veredicto."
 
 
-# ── Test 3: QueryLog does NOT have retrieved_context ────────────────────────
+#  Test 3: QueryLog NO tiene retrieved_context 
 
 def test_query_log_has_no_retrieved_context():
     import datetime

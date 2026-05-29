@@ -1,12 +1,12 @@
 """
-scrape_real.py — descarga imágenes reales de Unsplash y Wikimedia Commons
+scrape_real.py - descarga imágenes reales de Unsplash y Wikimedia Commons
 para la clase REAL del dataset propio de VERUM.
 
 Fuentes:
-    1. Unsplash API — endpoint /search/photos, per_page=30.
+    1. Unsplash API - endpoint /search/photos, per_page=30.
                       Requiere --unsplash-key o UNSPLASH_ACCESS_KEY.
                       Rate limit: 50 req/hora → delay de 72s entre requests.
-    2. Wikimedia Commons API — gratuita, sin key, fuente complementaria o
+    2. Wikimedia Commons API - gratuita, sin key, fuente complementaria o
                                fallback si no hay Unsplash key.
 
 Uso:
@@ -30,9 +30,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-# ---------------------------------------------------------------------------
 # Queries predefinidas agrupadas por categoría
-# ---------------------------------------------------------------------------
 QUERIES: dict[str, list[str]] = {
     "personas_famosas": [
         "famous politicians portrait",
@@ -78,9 +76,7 @@ QUERIES: dict[str, list[str]] = {
     ],
 }
 
-# ---------------------------------------------------------------------------
 # Logging
-# ---------------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(message)s",
@@ -88,16 +84,12 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
 # Unsplash rate-limit
 # Tier gratuito: 50 requests/hora → mínimo 72s entre cada request a la API.
-# ---------------------------------------------------------------------------
 _UNSPLASH_API = "https://api.unsplash.com"
 _UNSPLASH_RATE_DELAY = 72.0   # segundos entre requests (3600 / 50)
 
-# ---------------------------------------------------------------------------
 # Helpers genéricos
-# ---------------------------------------------------------------------------
 
 def _safe_dirname(query: str) -> str:
     """Convierte un query arbitrario en un nombre de directorio válido."""
@@ -156,9 +148,7 @@ def _has_camera_exif(path: Path) -> bool:
         return False
 
 
-# ---------------------------------------------------------------------------
 # Unsplash API
-# ---------------------------------------------------------------------------
 
 def _unsplash_search(api_key: str, query: str, page: int = 1) -> list[dict]:
     """
@@ -242,11 +232,11 @@ def _crawl_unsplash(
 
         page += 1
 
-        # ── Rate-limit: máximo 50 requests/hora ──────────────────────────────
+        # Rate-limit: máximo 50 requests/hora
         if downloaded < max_num and photos:
             log.info(
                 "    [Unsplash] Esperando %.0fs para respetar rate limit "
-                "(50 req/hora)…",
+                "(50 req/hora)...",
                 _UNSPLASH_RATE_DELAY,
             )
             time.sleep(_UNSPLASH_RATE_DELAY)
@@ -254,9 +244,7 @@ def _crawl_unsplash(
     return downloaded, with_exif
 
 
-# ---------------------------------------------------------------------------
 # Wikimedia Commons API
-# ---------------------------------------------------------------------------
 _WIKIMEDIA_API = "https://commons.wikimedia.org/w/api.php"
 _WIKIMEDIA_HEADERS = {"User-Agent": "VERUM-Dataset-Builder/1.0 (research project)"}
 _VALID_IMG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff"}
@@ -376,9 +364,7 @@ def _crawl_wikimedia(
     return downloaded, with_exif
 
 
-# ---------------------------------------------------------------------------
 # Dispatcher principal
-# ---------------------------------------------------------------------------
 
 def _crawl_query(
     query: str,
@@ -408,7 +394,7 @@ def _crawl_query(
         if n_dl < max_num:
             remaining = max_num - n_dl
             log.info(
-                "    [Wikimedia] Complementando %d imágenes restantes para '%s'…",
+                "    [Wikimedia] Complementando %d imagenes restantes para '%s'...",
                 remaining, query,
             )
             w_dl, w_exif = _crawl_wikimedia(query, dest, remaining, min_px, delay)
@@ -421,9 +407,7 @@ def _crawl_query(
         return _crawl_wikimedia(query, dest, max_num, min_px, delay)
 
 
-# ---------------------------------------------------------------------------
 # CLI
-# ---------------------------------------------------------------------------
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -475,9 +459,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-# ---------------------------------------------------------------------------
 # Main
-# ---------------------------------------------------------------------------
 
 def main() -> None:
     args = parse_args()
@@ -492,7 +474,7 @@ def main() -> None:
 
     if unsplash_key:
         log.info(
-            "Fuente primaria: Unsplash API (key=%s…) + Wikimedia como complemento.",
+            "Fuente primaria: Unsplash API (key=%s...) + Wikimedia como complemento.",
             unsplash_key[:6],
         )
         log.info(
@@ -549,15 +531,15 @@ def main() -> None:
         summary[category] = (cat_downloaded, cat_exif)
 
         if cat_idx < total_categories:
-            log.info("  Pausa entre categorías (%.1fs)…", delay * 2)
+            log.info("  Pausa entre categorias (%.1fs)...", delay * 2)
             time.sleep(delay * 2)
 
-    # ── Resumen final ────────────────────────────────────────────────────────
+    # Resumen final
     grand_total = 0
     grand_exif  = 0
 
     print("\n" + "═" * 68)
-    print("  RESUMEN — imágenes reales descargadas")
+    print("  RESUMEN - imagenes reales descargadas")
     print("═" * 68)
     print(f"  {'Categoría':<30s}  {'Descargadas':>12s}  {'Con EXIF':>10s}")
     print("─" * 68)
