@@ -30,7 +30,8 @@ export default function Hero() {
   return (
     <section
       id="hero"
-      className="relative overflow-hidden bg-white pt-24 pb-16 md:pt-32 md:pb-24"
+      className="relative overflow-hidden pt-24 pb-16 md:pt-32 md:pb-24"
+      style={{ background: "#F7F8FA" }}
     >
       {/* Decorative blob */}
       <div

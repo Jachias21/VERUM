@@ -114,7 +114,7 @@ export default function WhyVerum() {
           </motion.ul>
         </div>
 
-        {/* Right — Mascot */}
+        {/* Right — Logo with teal glow */}
         <motion.div
           initial={{ opacity: 0, x: 40 }}
           whileInView={{ opacity: 1, x: 0 }}
@@ -124,10 +124,13 @@ export default function WhyVerum() {
         >
           <Image
             src="/mascot/verum-pensando.png"
-            alt="VERUM pensando"
-            width={380}
-            height={380}
+            alt="VERUM logo"
+            width={500}
+            height={500}
             className="object-contain"
+            style={{
+              filter: "drop-shadow(0 0 40px rgba(76, 202, 209, 0.4))",
+            }}
           />
         </motion.div>
       </div>
