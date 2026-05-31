@@ -67,6 +67,9 @@ data/custom/
 *.hdf5
 *.sqlite
 *.db
+data/processed_v12/
+data/processed_v13/
+data/processed_v14/
 
 # ── Notebooks ─────────────────────────────────────────────────────────────────
 notebooks/.ipynb_checkpoints/
