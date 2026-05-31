@@ -5,3 +5,4 @@ plotly
 python-dotenv
 wordcloud
 matplotlib
+numpy
