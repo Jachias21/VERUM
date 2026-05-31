@@ -185,6 +185,15 @@ services:
     profiles:
       - test
     env_file: .env
+    depends_on:
+      qdrant: 
+        condition: service_started
+      ollama: 
+        condition: service_started
+      mongodb: 
+        condition: service_started
+      rabbitmq: 
+        condition: service_healthy
     volumes:
       - ./tests:/app/tests:ro
       - ./shared:/app/shared:ro
