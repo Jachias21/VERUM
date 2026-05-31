@@ -1,0 +1,57 @@
+[project]
+name = "verum"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "aio-pika",
+    "httpx",
+    "motor",
+    "pillow>=12.2.0",
+    "pydantic",
+    "python-dotenv",
+]
+
+[project.optional-dependencies]
+infra = [
+    "beautifulsoup4",
+    "fastapi",
+    "feedparser",
+    "pandas",
+    "plotly",
+    "pymongo",
+    "qdrant-client",
+    "rank-bm25",
+    "sentence-transformers",
+    "streamlit",
+    "uvicorn[standard]",
+]
+vision = [
+    "grad-cam",
+    "mlflow",
+    "numpy",
+    "onnxruntime",
+    "opencv-python-headless",
+    "python-telegram-bot",
+    "scikit-learn",
+    "scipy",
+    "torch",
+    "torchvision",
+    "tqdm",
+]
+nlp = [
+    "langchain",
+    "langchain-community",
+    "langchain-core",
+    "langchain-ollama",
+    "python-telegram-bot",
+    "qdrant-client",
+    "rank-bm25",
+    "sentence-transformers",
+    "spacy",
+]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+]

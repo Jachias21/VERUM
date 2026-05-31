@@ -9,34 +9,55 @@ Dataset expected layout:
     val/fake/<images>
 
 Usage:
-  python models/vision/train.py --epochs 30 --batch-size 32
+  python models/vision/train.py --epochs 10 --batch-size 32
+  python models/vision/train.py --epochs 10 --mlflow-uri ./mlruns
 """
 import argparse
 from pathlib import Path
 
 import torch
 import torch.nn as nn
+from tqdm import tqdm
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
 from architecture import TwoStreamCNN
+from preprocess import batch_to_freq_tensors
+
+# ---------------------------------------------------------------------------
+# MLflow — opcional; el script funciona sin él
+# ---------------------------------------------------------------------------
+try:
+    import mlflow
+    import mlflow.pytorch
+    _mlflow_available = True
+except ImportError:
+    _mlflow_available = False
+
+
+def _jpeg_compress_wrapper(img):
+    return _jpeg_compress(img, quality=60)
 
 
 def get_transforms(train: bool) -> transforms.Compose:
     ops = [transforms.Resize((224, 224))]
     if train:
         ops += [
-            # Simulate Telegram JPEG compression (key augmentation)
-            transforms.RandomApply([transforms.Lambda(lambda img: _jpeg_compress(img, quality=60))], p=0.5),
+            transforms.RandomApply(
+                [transforms.Lambda(_jpeg_compress_wrapper)], p=0.5
+            ),
             transforms.RandomHorizontalFlip(),
             transforms.ColorJitter(brightness=0.2, contrast=0.2),
         ]
-    ops += [transforms.ToTensor(), transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])]
+    ops += [
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+    ]
     return transforms.Compose(ops)
 
 
 def _jpeg_compress(img, quality: int = 70):
-    """Apply JPEG compression artifact simulation."""
+    """Simula la compresión JPEG que aplica Telegram a las imágenes."""
     import io
     from PIL import Image
     buf = io.BytesIO()
@@ -45,44 +66,175 @@ def _jpeg_compress(img, quality: int = 70):
     return Image.open(buf).copy()
 
 
-def train(epochs: int, batch_size: int, lr: float, data_root: Path, output_dir: Path):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+def get_device() -> torch.device:
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
+def train(
+    epochs: int,
+    batch_size: int,
+    lr: float,
+    data_root: Path,
+    output_dir: Path,
+    mlflow_uri: str = "./mlruns",
+):
+    device = get_device()
+    print(f"[train] Usando dispositivo: {device}")
+
+    # ── MLflow run ───────────────────────────────────────────────────────────
+    _mlflow_enabled = _mlflow_available
+    if _mlflow_enabled:
+        mlflow.set_tracking_uri(mlflow_uri)
+        mlflow.set_experiment("VERUM-TwoStreamCNN")
+        mlflow.start_run()
+        mlflow.log_params({
+            "epochs":        epochs,
+            "batch_size":    batch_size,
+            "lr":            lr,
+            "arquitectura":  "TwoStreamCNN-EfficientNetB0",
+            "dataset":       "CIFAKE",
+        })
+        print(f"[train] MLflow tracking activado → {mlflow_uri}")
+    else:
+        print("[train] mlflow no instalado — tracking desactivado.")
+
     model = TwoStreamCNN(pretrained=True).to(device)
+
+    # ── Fine-tuning: congelar backbone espacial inicialmente ─────────────────
+    for name, param in model.spatial_branch.named_parameters():
+        param.requires_grad = False
+    print("[train] Backbone EfficientNet congelado — solo se entrenan head y rama frecuencial")
 
     train_ds = datasets.ImageFolder(data_root / "train", transform=get_transforms(train=True))
     val_ds   = datasets.ImageFolder(data_root / "val",   transform=get_transforms(train=False))
-    train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True,  num_workers=4)
-    val_dl   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False, num_workers=4)
+    train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True,  num_workers=0, pin_memory=True)
+    val_dl   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False, num_workers=0, pin_memory=True)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
+    # Verificar que las clases están en el orden correcto (fake=0, real=1)
+    print(f"[train] Clases detectadas: {train_ds.class_to_idx}")
+
+    optimizer = torch.optim.AdamW(
+        filter(lambda p: p.requires_grad, model.parameters()),
+        lr=lr, weight_decay=1e-4
+    )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     criterion = nn.BCELoss()
 
+    best_val_acc = 0.0
+
     for epoch in range(1, epochs + 1):
+
+        # ── Descongelar backbone en epoch 3 ──────────────────────────────────
+        if epoch == 3:
+            for param in model.spatial_branch.parameters():
+                param.requires_grad = True
+            optimizer = torch.optim.AdamW(model.parameters(), lr=lr / 10, weight_decay=1e-4)
+            print("[train] Epoch 3 — backbone descongelado, fine-tuning completo con lr reducido")
+
+        # ── Training loop ─────────────────────────────────────────────────────
         model.train()
-        for imgs, labels in train_dl:
-            imgs, labels = imgs.to(device), labels.float().unsqueeze(1).to(device)
-            # TODO: generate freq tensor from imgs (call preprocessing)
-            freq = torch.zeros(imgs.size(0), 2, 224, 224).to(device)  # placeholder
+        train_loss, train_correct, train_total = 0.0, 0, 0
+
+        for imgs, labels in tqdm(train_dl, desc=f"Epoch {epoch:02d}/{epochs} [Train]"):
+            imgs   = imgs.to(device)
+            labels = labels.float().unsqueeze(1).to(device)
+
+            freq = batch_to_freq_tensors(imgs).to(device)
+
             preds = model(imgs, freq)
-            loss = criterion(preds, labels)
+            loss  = criterion(preds, labels)
+
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-        scheduler.step()
-        print(f"Epoch {epoch}/{epochs} — loss: {loss.item():.4f}")
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    torch.save(model.state_dict(), output_dir / "verum_cnn.pt")
-    print(f"Model saved to {output_dir}/verum_cnn.pt")
+            train_loss    += loss.item() * imgs.size(0)
+            train_correct += ((preds >= 0.5) == labels.bool()).sum().item()
+            train_total   += imgs.size(0)
+
+        scheduler.step()
+
+        # ── Validation loop ───────────────────────────────────────────────────
+        model.eval()
+        val_correct, val_total = 0, 0
+
+        with torch.no_grad():
+            for imgs, labels in tqdm(val_dl, desc=f"Epoch {epoch:02d}/{epochs} [Val]"):
+                imgs   = imgs.to(device)
+                labels = labels.float().unsqueeze(1).to(device)
+                freq   = batch_to_freq_tensors(imgs).to(device)
+
+                preds = model(imgs, freq)
+                val_correct += ((preds >= 0.5) == labels.bool()).sum().item()
+                val_total   += imgs.size(0)
+
+        train_acc = train_correct / train_total
+        val_acc   = val_correct   / val_total
+        avg_loss  = train_loss    / train_total
+
+        print(
+            f"Epoch {epoch:02d}/{epochs} — "
+            f"loss: {avg_loss:.4f} — "
+            f"train_acc: {train_acc:.4f} — "
+            f"val_acc: {val_acc:.4f}"
+        )
+
+        # ── MLflow métricas por epoch ─────────────────────────────────────────
+        if _mlflow_enabled:
+            mlflow.log_metrics(
+                {
+                    "train_loss": avg_loss,
+                    "train_acc":  train_acc,
+                    "val_acc":    val_acc,
+                },
+                step=epoch,
+            )
+
+        # Guardar el mejor modelo
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            output_dir.mkdir(parents=True, exist_ok=True)
+            best_pt = output_dir / "verum_cnn_best.pt"
+            torch.save(model.state_dict(), best_pt)
+            print(f"  ✓ Mejor modelo guardado (val_acc: {val_acc:.4f})")
+            if _mlflow_enabled:
+                mlflow.log_artifact(str(best_pt))
+
+    # Guardar checkpoint final
+    final_pt = output_dir / "verum_cnn_final.pt"
+    torch.save(model.state_dict(), final_pt)
+    print(f"\n[train] Entrenamiento completado. Mejor val_acc: {best_val_acc:.4f}")
+
+    if _mlflow_enabled:
+        mlflow.log_artifact(str(final_pt))
+        mlflow.end_run()
+        print(f"[train] MLflow run cerrado. Resultados en: {mlflow_uri}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--epochs",     type=int,   default=30)
-    parser.add_argument("--batch-size", type=int,   default=32)
-    parser.add_argument("--lr",         type=float, default=1e-4)
-    parser.add_argument("--data-root",  type=Path,  default=Path("../../data/processed"))
-    parser.add_argument("--output-dir", type=Path,  default=Path("weights"))
+    parser.add_argument("--epochs",      type=int,   default=10)
+    parser.add_argument("--batch-size",  type=int,   default=32)
+    parser.add_argument("--lr",          type=float, default=1e-4)
+    parser.add_argument("--data-root",   type=Path,  default=Path("../../data/processed"))
+    parser.add_argument("--output-dir",  type=Path,  default=Path("weights"))
+    parser.add_argument(
+        "--mlflow-uri",
+        type=str,
+        default="./mlruns",
+        help="URI del servidor MLflow (default: ./mlruns local). "
+             "Ejemplo remoto: http://mlflow-server:5000",
+    )
     args = parser.parse_args()
-    train(args.epochs, args.batch_size, args.lr, args.data_root, args.output_dir)
+    train(
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        lr=args.lr,
+        data_root=args.data_root,
+        output_dir=args.output_dir,
+        mlflow_uri=args.mlflow_uri,
+    )

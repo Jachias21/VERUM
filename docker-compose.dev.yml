@@ -18,6 +18,8 @@ services:
       - ./models/vision/weights:/app/weights
 
   worker_nlp:
+    ports:
+      - "9101:9101"   # Prometheus metrics → http://localhost:9101/metrics
     volumes:
       - ./services/worker_nlp/app:/app/app
       - ./shared:/app/shared

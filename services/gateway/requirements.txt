@@ -1,7 +1,9 @@
-fastapi==0.115.0
-uvicorn[standard]==0.30.6
-aio-pika==9.4.3          # RabbitMQ async client
-pydantic==2.7.4
-httpx==0.27.0             # Telegram file downloads
-motor==3.5.0              # Async MongoDB (for query logging)
-python-dotenv==1.0.1
+fastapi
+uvicorn[standard]
+aio-pika          # RabbitMQ async client
+pydantic
+httpx             # Telegram file downloads
+motor              # Async MongoDB (for query logging)
+python-dotenv
+python-telegram-bot  # Telegram Bot API (interim messages, command replies)
+prometheus-client

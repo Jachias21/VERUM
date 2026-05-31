@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+:root {
+  --color-navy: #0D1B2A;
+  --color-teal: #4CCAD1;
+  --color-teal-light: #BFE8EE;
+  --color-gray-light: #E6E8ED;
+  --color-white: #FFFFFF;
+  --color-text-primary: #0D1B2A;
+  --color-text-secondary: #4A5568;
+}
+
+@theme inline {
+  --color-navy: #0D1B2A;
+  --color-teal: #4CCAD1;
+  --color-teal-hover: #3BB5BC;
+  --color-teal-light: #BFE8EE;
+  --color-gray-light: #E6E8ED;
+  --color-section-bg: #F7F8FA;
+  --color-text-primary: #0D1B2A;
+  --color-text-secondary: #4A5568;
+  --color-danger: #FF6B6B;
+
+  --font-poppins: 'Poppins', sans-serif;
+  --font-nunito: 'Nunito', sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-nunito);
+  color: var(--color-text-primary);
+  background: var(--color-white);
+}
+
+h1, h2, h3 {
+  font-family: var(--font-poppins);
+}
+
+@keyframes float {
+  0%   { transform: translateY(0px); }
+  50%  { transform: translateY(-8px); }
+  100% { transform: translateY(0px); }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}

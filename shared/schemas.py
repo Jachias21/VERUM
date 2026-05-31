@@ -17,12 +17,14 @@ class ImageTask(BaseModel):
     query_id: uuid.UUID = Field(default_factory=uuid.uuid4)
     user_hash: str                      # SHA-256 of Telegram user_id (GDPR-safe)
     telegram_file_id: str
+    chat_id: int
     timestamp: datetime.datetime
 
 
 class TextTask(BaseModel):
     query_id: uuid.UUID = Field(default_factory=uuid.uuid4)
     user_hash: str
+    chat_id: int
     text: str
     timestamp: datetime.datetime
 
@@ -38,11 +40,19 @@ class VisionResult(BaseModel):
 
 
 class NLPResult(BaseModel):
+    """NLP worker result.
+
+    retrieved_context: raw text of the source article retrieved from Qdrant/Google,
+                       used as input to the LLM.
+    summary:           final verdict synthesised by the LLM from retrieved_context.
+    """
+
     query_id: uuid.UUID
     extracted_entities: list[str]
     fact_check_matches: int
     source_url: str | None = None
     verdict: Literal["FAKE", "REAL", "UNVERIFIED"]
+    retrieved_context: str = ""         # source article text fed to the LLM
     summary: str                        # LLM-generated 3-line verdict
 
 
@@ -55,6 +65,7 @@ class QueryLog(BaseModel):
     payload_type: Literal["image", "text"]
     total_processing_time_ms: int
     final_verdict: Literal["FAKE", "REAL", "UNVERIFIED"]
+    cache_hit: bool = False
     # image-specific
     image_resolution: str | None = None
     ai_confidence_score: float | None = None
@@ -63,3 +74,4 @@ class QueryLog(BaseModel):
     extracted_entities: list[str] | None = None
     fact_check_matches: int | None = None
     source_url: str | None = None
+    feedback: str | None = None         # "correct" | "incorrect" — set via /feedback command
