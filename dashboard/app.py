@@ -134,13 +134,54 @@ hr { border-color: #1e3a5f !important; }
     border: 1px solid #1e3a5f;
     border-radius: 10px;
 }
+
+/* ─ Texto general: párrafos, labels, captions, info boxes ─ */
+p, span, label, li, div {
+    color: #c0d0e0;
+}
+/* Caption de Streamlit */
+[data-testid="stCaptionContainer"] p,
+.stCaption, small {
+    color: #a0b4c8 !important;
+    font-size: .85em;
+}
+/* Info / warning / success boxes */
+[data-testid="stAlert"] {
+    background: #131f2e !important;
+    border: 1px solid #1e3a5f !important;
+    color: #c0d0e0 !important;
+    border-radius: 10px;
+}
+[data-testid="stAlert"] p {
+    color: #c0d0e0 !important;
+}
+/* Texto de subtítulos de subplots de Plotly (van como anotaciones en SVG,
+   no necesitan CSS, pero por si acaso) */
+/* st.info() text */
+div[data-baseweb="notification"] {
+    background: #131f2e !important;
+    color: #c0d0e0 !important;
+}
+/* Nota al pie / warning personalizado */
+.nota-pie {
+    background: linear-gradient(135deg, #131f2e, #192840);
+    border: 1px solid #2d4a6a;
+    border-left: 4px solid #e9c46a;
+    border-radius: 8px;
+    padding: 12px 18px;
+    color: #c8d8e8;
+    font-size: .88em;
+    margin-top: 8px;
+    line-height: 1.6;
+}
+.nota-pie strong { color: #e9c46a; }
 </style>
 """, unsafe_allow_html=True)
 
 # ── Header ─────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="verum-header">
-  <p class="verum-logo">🔍 VERUM <span class="verum-pill">TFM · 2025</span></p>
+  <p class="verum-logo">🔍 VERUM <span class="verum-pill">TFM · 2026</span></p>
   <p class="verum-sub">Sistema de detección de desinformación &nbsp;·&nbsp;
                        Máster IA &amp; Big Data</p>
 </div>
@@ -674,8 +715,13 @@ with tab_eval:
     )
     st.plotly_chart(fig_lc, use_container_width=True)
     dm_f1_pct = dm_f1 / BASE["macro_f1"] * 100
-    st.caption(
-        f"⚠️  El modelo 14B necesita aproximadamente el doble de tiempo de inferencia. "
-        f"La mejora en Macro-F1 (+{dm_f1_pct:.1f}%) tiene como trade-off mayor latencia. "
-        f"Los valores de latencia del 14B son representativos del coste de escalar el modelo."
+    st.markdown(
+        f'<div class="nota-pie">'
+        f'<strong>⚠️ Trade-off de escala</strong> &nbsp;·&nbsp; '
+        f'El modelo 14B necesita aproximadamente el doble de tiempo de inferencia. '
+        f'La mejora en Macro-F1 (<strong>+{dm_f1_pct:.1f}%</strong>) tiene como contraparte '
+        f'una mayor latencia. Los valores de latencia del 14B son representativos del '
+        f'coste de escalar el modelo en un entorno de producción.'
+        f'</div>',
+        unsafe_allow_html=True,
     )
