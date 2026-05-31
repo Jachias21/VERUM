@@ -32,18 +32,28 @@ build/
 pip-log.txt
 
 # ── Modelos ML (binarios grandes) ────────────────────────────────────────────
-models/vision/weights/*.pt
-models/vision/weights/*.pth
-models/vision/weights/*.onnx
-models/vision/weights/*.bin
-models/vision/weights/*.safetensors
+models/vision/weights/**/*.pt
+models/vision/weights/**/*.pth
+models/vision/weights/**/*.onnx
+models/vision/weights/**/*.bin
+models/vision/weights/**/*.safetensors
+services/worker_vision/weights/**/*.pt
+services/worker_vision/weights/**/*.pth
+services/worker_vision/weights/**/*.onnx
+services/worker_vision/weights/**/*.bin
+services/worker_vision/weights/**/*.safetensors
 # Modelos descargados por HuggingFace / sentence-transformers
 ~/.cache/huggingface/
 .cache/
+mlruns/
 
 # ── Datos (raw y procesados nunca van al repo) ────────────────────────────────
 data/raw/
 data/processed/
+data/custom/
+data/test_custom/
+data/eval_results/
+data/test_pipeline/
 data/knowledge_base/
 data/custom/
 !data/**/.gitkeep

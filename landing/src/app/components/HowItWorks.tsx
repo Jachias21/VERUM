@@ -133,7 +133,7 @@ export default function HowItWorks() {
       id="how"
       ref={sectionRef}
       style={{
-        background: "#ffffff",
+        background: "#F7F8FA",
         paddingTop: "80px",
         paddingBottom: "80px",
         /* NOTE: NO overflow here — any overflow value breaks position:sticky */

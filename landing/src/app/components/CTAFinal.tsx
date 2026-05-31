@@ -34,7 +34,7 @@ export default function CTAFinal() {
       id="cta-final"
       className="py-32"
       style={{
-        background: "linear-gradient(to bottom, #FFFFFF, #BFE8EE)",
+        background: "linear-gradient(to bottom, #F7F8FA, #BFE8EE)",
       }}
     >
       <div className="mx-auto flex max-w-3xl flex-col items-center px-6 text-center">
