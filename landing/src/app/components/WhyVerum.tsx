@@ -123,10 +123,10 @@ export default function WhyVerum() {
           className="flex justify-center"
         >
           <Image
-            src="/mascot/logo.png"
+            src="/mascot/verum-pensando.png"
             alt="VERUM logo"
-            width={280}
-            height={280}
+            width={500}
+            height={500}
             className="object-contain"
             style={{
               filter: "drop-shadow(0 0 40px rgba(76, 202, 209, 0.4))",
