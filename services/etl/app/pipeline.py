@@ -232,14 +232,18 @@ def _infer_verdict_from_entry(
     has_fake = any(w in combined for w in _FAKE_KEYWORDS)
     has_real = any(w in combined for w in _REAL_KEYWORDS)
 
+    domain_class = _domain_class(source_url)
+
     if has_fake and has_real:
+        # Fact-checkers que mencionan ambas señales están desacreditando algo falso
+        if domain_class == "factchecker":
+            return "FAKE"
         return "UNVERIFIED"
     if has_fake:
         return "FAKE"
     if has_real:
         return "REAL"
 
-    domain_class = _domain_class(source_url)
     if domain_class == "institutional":
         return "REAL"
     if domain_class == "factchecker":

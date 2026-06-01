@@ -50,7 +50,6 @@ _REAL_NL_PATTERNS: list[re.Pattern] = [
 _UNVERIFIED_NL_PATTERNS: list[re.Pattern] = [
     re.compile(r"\bno\s+(se\s+puede|hay\s+forma\s+de|hay\s+manera\s+de)\s+confirmar\b", re.IGNORECASE),
     re.compile(r"\bno\s+hay\s+(suficiente\s+)?(información|evidencia)\b", re.IGNORECASE),
-    re.compile(r"\bno\s+menciona\b", re.IGNORECASE),
 ]
 # English NL signals
 _FAKE_EN_PATTERNS: list[re.Pattern] = [
@@ -111,56 +110,47 @@ Tu primera línea DEBE empezar con "VEREDICTO: " seguido de FALSO, VERDADERO o N
 
 _PROMPT_GENERAL_KNOWLEDGE = """Eres un verificador de hechos experto. No tienes un artículo de referencia: usa tu conocimiento general para evaluar un mensaje viral.
 
-REGLA DE ORO: ante CUALQUIER duda, responde NO VERIFICADO. Esta etiqueta NO es una derrota; es la respuesta CORRECTA cuando no puedes probar ni refutar el mensaje. Es preferible un NO VERIFICADO honesto a un FALSO precipitado.
+CRITERIOS (en orden de aplicación):
 
-CRITERIOS:
+1. Responde FALSO cuando el mensaje contradice un hecho científico, histórico, geográfico o institucional bien establecido. No hace falta consenso del 100%: basta con que la comunidad científica o las instituciones relevantes lo hayan refutado.
+   Ejemplo: "La Tierra es plana", "El hombre no llegó a la Luna", "Las vacunas causan autismo", bulos virales conocidos sobre salud o política.
 
-1. Responde FALSO solo cuando el mensaje contradice DIRECTAMENTE un hecho científico, histórico, geográfico o institucional bien establecido y de consenso amplio.
-   Ejemplo: "La Tierra es plana", "El hombre no llegó a la Luna", "Las vacunas causan autismo".
-
-2. Responde VERDADERO solo cuando el mensaje afirma un hecho científico, histórico, geográfico o institucional bien establecido y de consenso amplio.
+2. Responde VERDADERO cuando el mensaje afirma un hecho bien establecido y verificable.
    Ejemplo: "El Muro de Berlín cayó en 1989", "España es miembro de la UE", "El agua hierve a 100°C al nivel del mar".
 
-3. Responde NO VERIFICADO en TODOS los demás casos, especialmente:
-   - Noticias sobre eventos recientes (últimos 24 meses) que requieran información actualizada.
-   - Declaraciones sobre personas vivas, políticos en activo, empresas, decisiones gubernamentales recientes.
-   - Datos económicos, estadísticas, indicadores que cambian con el tiempo.
-   - Detalles específicos médicos, legales, financieros que requieren verificación profesional.
-   - Predicciones futuras, opiniones, valoraciones subjetivas.
-   - Información parcialmente cierta o cierta solo bajo ciertas condiciones.
-   - Cualquier afirmación donde no estés seguro al 95%.
+3. Responde NO VERIFICADO solo cuando genuinamente no puedas clasificarlo como FALSO o VERDADERO:
+   - Predicciones futuras.
+   - Datos estadísticos muy específicos que cambian con el tiempo (IPC exacto, cifras de paro de un mes concreto).
+   - Afirmaciones sobre decisiones gubernamentales muy recientes sin información establecida.
+   - Opiniones subjetivas o valoraciones personales.
 
-EJEMPLOS DETALLADOS:
+EJEMPLOS:
 
 Mensaje: "El presidente del Gobierno firmará la ley X la próxima semana"
-Análisis: predicción futura sobre actor político actual. No es verificable.
-VEREDICTO: NO VERIFICADO
-
-Mensaje: "El IPC de España en abril fue del 2,3%"
-Análisis: dato económico específico y reciente. Requiere consulta al INE; no puedo confirmar de memoria.
-VEREDICTO: NO VERIFICADO
-
-Mensaje: "Pedro Sánchez es presidente del Gobierno de España"
-Análisis: hecho político actual, pero requiere comprobar si sigue siéndolo hoy mismo.
+Análisis: predicción futura. No verificable.
 VEREDICTO: NO VERIFICADO
 
 Mensaje: "El cambio climático está causado principalmente por la actividad humana"
-Análisis: consenso científico amplio respaldado por el IPCC.
+Análisis: consenso científico amplio (IPCC).
 VEREDICTO: VERDADERO
 
 Mensaje: "Las vacunas contienen microchips para rastrear a la población"
-Análisis: contradice directamente el conocimiento científico y técnico establecido.
+Análisis: bulo conocido que contradice el conocimiento científico y técnico.
+VEREDICTO: FALSO
+
+Mensaje: "El 5G causa cáncer"
+Análisis: afirmación refutada por la OMS y organismos de salud.
 VEREDICTO: FALSO
 
 Mensaje: "El gobierno regala 200€ a todos los pensionistas este mes"
-Análisis: requiere verificación documental específica que no tengo. No puedo confirmar ni desmentir.
+Análisis: dato administrativo específico y reciente. Sin información verificable.
 VEREDICTO: NO VERIFICADO
 
 AHORA EVALÚA:
 
 Mensaje viral: {claim}
 
-Tu primera línea DEBE empezar con "VEREDICTO: " seguido EXACTAMENTE de una de estas tres palabras: FALSO, VERDADERO o NO VERIFICADO. Tras el veredicto, escribe 2-3 líneas explicando tu razonamiento. Si no estás completamente seguro, di NO VERIFICADO.
+Tu primera línea DEBE empezar con "VEREDICTO: " seguido EXACTAMENTE de una de estas tres palabras: FALSO, VERDADERO o NO VERIFICADO. Tras el veredicto, escribe 2-3 líneas explicando tu razonamiento.
 """
 
 
@@ -443,29 +433,40 @@ def _extract_verdict_from_llm_output(text: str) -> str | None:
     if re.search(r"verdict:\s*(true|real)", text, re.IGNORECASE):
         return "REAL"
 
-    # Fallback NL en español
+    # Primera línea corta: el LLM puede escribir el veredicto solo, sin prefijo
+    first_line = text.split("\n")[0].strip()
+    if len(first_line) <= 25:
+        fl_upper = first_line.upper()
+        if fl_upper in ("NO VERIFICADO", "NO_VERIFICADO", "UNVERIFIED"):
+            return "UNVERIFIED"
+        if fl_upper in ("FALSO", "FALSE", "FAKE"):
+            return "FAKE"
+        if fl_upper in ("VERDADERO", "TRUE", "REAL"):
+            return "REAL"
+
+    # Fallback NL en español - FAKE/REAL tienen prioridad sobre UNVERIFIED
     _t2_fake = any(p.search(text) for p in _FAKE_NL_PATTERNS)
     _t2_real = any(p.search(text) for p in _REAL_NL_PATTERNS)
     _t2_unverified = any(p.search(text) for p in _UNVERIFIED_NL_PATTERNS)
 
+    if _t2_fake and not _t2_real:
+        return "FAKE"
+    if _t2_real and not _t2_fake:
+        return "REAL"
     if _t2_unverified:
         return "UNVERIFIED"
-    if _t2_fake:
-        return "FAKE"
-    if _t2_real:
-        return "REAL"
 
     # Fallback NL en inglés
     _t3_fake = any(p.search(text) for p in _FAKE_EN_PATTERNS)
     _t3_real = any(p.search(text) for p in _REAL_EN_PATTERNS)
     _t3_unverified = any(p.search(text) for p in _UNVERIFIED_EN_PATTERNS)
 
+    if _t3_fake and not _t3_real:
+        return "FAKE"
+    if _t3_real and not _t3_fake:
+        return "REAL"
     if _t3_unverified:
         return "UNVERIFIED"
-    if _t3_fake:
-        return "FAKE"
-    if _t3_real:
-        return "REAL"
 
     return None
 
