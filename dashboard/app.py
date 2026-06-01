@@ -3,7 +3,7 @@ Dashboard analítico de VERUM — Streamlit.
 
 Tab 1: Uso en tiempo real  (MongoDB)
 Tab 2: Evaluación del modelo NLP
-         · Resultados del modelo en producción  (Llama 3.1 14B · Ollama 2.3)
+         · Resultados del modelo en producción  (Qwen 2.5 14B Instruct · Q4_K_M)
          · Comparativa: 14B vs modelo base (cargado de reports/eval_summary.json)
 
 Ejecución: streamlit run dashboard/app.py   (desde la raíz del proyecto)
@@ -64,7 +64,7 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 }
 .verum-logo  { font-size: 2.4em; font-weight: 800; color: #00d4ff;
                letter-spacing: 3px; margin: 0; line-height: 1; }
-.verum-sub   { color: #7a9bb5; font-size: 0.9em; margin: 7px 0 0; }
+.verum-sub   { color: #9bb6cc; font-size: 0.9em; margin: 7px 0 0; }
 .verum-pill  { display: inline-block; background: rgba(0,212,255,.12);
                border: 1px solid #00d4ff; color: #00d4ff; font-size: .72em;
                font-weight: 700; padding: 3px 11px; border-radius: 20px;
@@ -76,7 +76,7 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     border: 1px solid #1e3a5f; border-radius: 12px; padding: 18px 20px;
 }
 [data-testid="stMetricValue"] { color: #00d4ff !important; font-weight: 700; }
-[data-testid="stMetricLabel"] { color: #7a9bb5 !important; font-size: .82em; }
+[data-testid="stMetricLabel"] { color: #9bb6cc !important; font-size: .82em; }
 
 /* ─ Section titles ─ */
 .stitle {
@@ -197,14 +197,14 @@ _PB = dict(
 
 LABELS = ["FAKE", "REAL", "UNVERIFIED"]
 
-# ── Modelo de PRODUCCIÓN — Llama 3.1 14B (métricas reales de eval_report.html) ─
+# ── Modelo de PRODUCCIÓN — Qwen 2.5 14B Instruct(métricas reales de eval_report.html) ─
 # Matriz de confusión inferida algebraicamente:
 #   FAKE  → recall=1.0 → TP=30, FN=0          → [30,  0,  0]
 #   REAL  → recall=0.2 → TP=3,  FN=12         → [12,  3,  0]
 #   UNVER → recall=0.533 → TP=8, FN=7         → [ 6,  1,  8]
 #   Precisiones: FAKE=30/48=0.625✓  REAL=3/4=0.75✓  UNVER=8/8=1.0✓
 PROD = {
-    "label": "Llama 3.1 14B · Ollama 2.3",
+    "label": "Qwen 2.5 14B Instruct · Q4_K_M",
     "macro_f1": 0.5936,
     "per_class": {
         "FAKE":       {"precision": 0.6250, "recall": 1.0000, "f1": 0.7692, "support": 30},
@@ -246,7 +246,7 @@ if not _base_path.exists():
     _base_path = Path("reports") / "eval_summary.json"
 
 _BASE_FALLBACK = {
-    "label": "Modelo base (3B · Ollama 2.3)",
+    "label": "Modelo base (Ollama 3B)",
     "macro_f1": 0.4093,
     "per_class": {
         "FAKE":       {"precision": 1.0000, "recall": 0.1000, "f1": 0.1818, "support": 30},
@@ -275,7 +275,7 @@ _BASE_FALLBACK = {
 if _base_path.exists():
     _loaded = json.loads(_base_path.read_text(encoding="utf-8"))
     BASE = {**_BASE_FALLBACK, **_loaded}
-    BASE["label"] = "Modelo base (3B · Ollama 2.3)"
+    BASE["label"] = "Modelo base (Ollama 3B)"
 else:
     BASE = _BASE_FALLBACK
 
@@ -404,9 +404,9 @@ with tab_eval:
         arr  = np.array(cm_list)
         norm = arr.astype(float) / (arr.sum(axis=1, keepdims=True) + 1e-9)
         ann  = [dict(x=labels[j], y=labels[i],
-                     text=f"<b>{arr[i,j]}</b><br>{norm[i,j]:.1%}",
-                     showarrow=False,
-                     font=dict(color="white" if norm[i,j] > .4 else "#c0d0e0", size=14))
+                 text=f"<b>{arr[i,j]}</b><br>{norm[i,j]:.1%}",
+                 showarrow=False,
+                 font=dict(color="#0a1628" if norm[i,j] > .55 else "#d4e2ef", size=14))
                 for i in range(len(labels)) for j in range(len(labels))]
         fig = go.Figure(go.Heatmap(
             z=norm, x=labels, y=labels, zmin=0, zmax=1,
@@ -527,7 +527,7 @@ with tab_eval:
     <p class="ctitle">
         Comparativa de modelos &nbsp;
         <span style="font-size:.7em;color:#7a9bb5;font-weight:400;">
-            Llama 3.1 14B en producción vs modelo base (3B)
+            Qwen 2.5 14B Instruct en producción vs modelo base (Ollama 3B)
         </span>
     </p>""", unsafe_allow_html=True)
 
@@ -644,7 +644,7 @@ with tab_eval:
                     x=labels[j], y=labels[i],
                     text=f"<b>{arr[i,j]}</b><br>{norm[i,j]:.1%}",
                     showarrow=False,
-                    font=dict(color="white" if norm[i,j] > .4 else "#c0d0e0", size=13),
+                    font=dict(color="#0a1628" if norm[i,j] > .55 else "#d4e2ef", size=13),
                     xref=xref, yref=yref,
                 )
 
